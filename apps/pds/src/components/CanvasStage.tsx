@@ -1,41 +1,62 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   fitBounds,
-  pickPiece,
-  pickPoint,
+  getTool,
+  panTool,
   renderScene,
   screenToWorld,
   useCanvasSurface,
   type Scene,
+  type ToolActions,
+  type ToolContext,
+  type ToolGesture,
 } from '@/canvas';
-import { BoundsOps } from '@/geometry';
+import { BoundsOps, type Vec2 } from '@/geometry';
 import { documentBounds } from '@/pattern';
 import {
-  pieceRef,
-  pointRef,
+  selectionKey,
   useDocumentStore,
   useSelectionStore,
   useUiStore,
   useViewportStore,
+  type SelectionKind,
+  type SelectionRef,
 } from '@/store';
 
 const ZOOM_SENSITIVITY = 0.0015;
 
-/** Pick radius for points, in screen pixels. */
+/** Pick tolerance for points, in screen pixels. */
 const POINT_PICK_RADIUS_PX = 9;
 
 /**
- * The canvas is the application. Everything else is chrome arranged around it, and
- * it never unmounts when the workspace changes.
+ * What each workspace lets you pick, most specific first. Grade works on grade
+ * points, so those win over the piece they sit on; everything else selects
+ * whole pieces.
+ */
+const SELECTABLE_BY_WORKSPACE: Record<string, readonly SelectionKind[]> = {
+  grade: ['point', 'piece'],
+};
+const DEFAULT_SELECTABLE: readonly SelectionKind[] = ['piece'];
+
+/**
+ * Canvas host.
+ *
+ * Owns the surface, the render loop and pointer plumbing — and nothing else.
+ * All interaction behaviour lives in `canvas/tools`, so adding a drafting tool
+ * means writing a `CanvasTool` and registering it, never editing this file.
  */
 export const CanvasStage = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const surface = useCanvasSurface(canvasRef);
-  const panningRef = useRef(false);
-  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+
+  /** The drag in progress, owned by whichever tool started it. */
+  const gestureRef = useRef<ToolGesture | null>(null);
+  const [gestureCursor, setGestureCursor] = useState<string | null>(null);
+  const [hover, setHover] = useState<SelectionRef | null>(null);
 
   const doc = useDocumentStore((s) => s.document);
   const pieces = doc.pieces;
+
   const selectedPieceIds = useSelectionStore((s) => s.selectedPieceIds);
   const selectedPointIds = useSelectionStore((s) => s.selectedPointIds);
   const select = useSelectionStore((s) => s.select);
@@ -45,15 +66,38 @@ export const CanvasStage = () => {
   const showGrid = useViewportStore((s) => s.showGrid);
   const layers = useViewportStore((s) => s.layers);
   const setCamera = useViewportStore((s) => s.setCamera);
-  const didFitRef = useRef(false);
   const panBy = useViewportStore((s) => s.panBy);
   const zoomAtPoint = useViewportStore((s) => s.zoomAtPoint);
   const setCursor = useViewportStore((s) => s.setCursor);
 
   const activeTool = useUiStore((s) => s.activeTool);
   const workspace = useUiStore((s) => s.workspace);
+  const didFitRef = useRef(false);
 
-  // Frame the document once, on first paint, so it never opens off-screen.
+  const tool = getTool(activeTool);
+
+  /* --- Actions handed to tools ------------------------------------------- */
+
+  const actions = useMemo<ToolActions>(
+    () => ({
+      select,
+      clearSelection,
+      panBy,
+      // Only re-render when the hovered thing actually changes; pointer moves
+      // fire far faster than the scene needs to redraw.
+      setHover: (ref) =>
+        setHover((current) => {
+          const same =
+            current === ref ||
+            (current !== null && ref !== null && selectionKey(current) === selectionKey(ref));
+          return same ? current : ref;
+        }),
+    }),
+    [select, clearSelection, panBy],
+  );
+
+  /* --- Frame the document once, so it never opens off-screen -------------- */
+
   useEffect(() => {
     if (didFitRef.current || surface.width === 0 || pieces.length === 0) return;
     const bounds = documentBounds(doc);
@@ -62,11 +106,20 @@ export const CanvasStage = () => {
     setCamera(fitBounds(bounds, surface.width, surface.height));
   }, [doc, pieces, surface, setCamera]);
 
-  // Draw whenever the scene, camera or surface changes.
+  /* --- Draw --------------------------------------------------------------- */
+
   useEffect(() => {
     const ctx = canvasRef.current?.getContext('2d');
     if (!ctx || surface.width === 0) return;
-    const scene: Scene = { pieces, selectedPieceIds, selectedPointIds };
+
+    const scene: Scene = {
+      pieces,
+      selectedPieceIds,
+      selectedPointIds,
+      hoveredPieceId: hover?.pieceId ?? null,
+      hoveredPointId: hover?.kind === 'point' ? hover.pointId : null,
+    };
+
     renderScene(ctx, scene, {
       camera,
       width: surface.width,
@@ -80,6 +133,7 @@ export const CanvasStage = () => {
     pieces,
     selectedPieceIds,
     selectedPointIds,
+    hover,
     camera,
     surface,
     showGrid,
@@ -87,7 +141,8 @@ export const CanvasStage = () => {
     workspace,
   ]);
 
-  // Wheel must be non-passive so the page does not scroll while zooming.
+  /* --- Wheel: viewport concern, not a tool concern ------------------------ */
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -107,58 +162,59 @@ export const CanvasStage = () => {
     return () => canvas.removeEventListener('wheel', onWheel);
   }, [panBy, zoomAtPoint]);
 
-  const localPoint = useCallback((event: React.PointerEvent<HTMLCanvasElement>) => {
+  /* --- Pointer plumbing --------------------------------------------------- */
+
+  const buildContext = (
+    event: React.PointerEvent<HTMLCanvasElement>,
+  ): ToolContext => {
     const rect = event.currentTarget.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
-  }, []);
+    const screen: Vec2 = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    return {
+      pieces,
+      camera,
+      screen,
+      world: screenToWorld(camera, screen),
+      modifiers: {
+        shift: event.shiftKey,
+        alt: event.altKey,
+        meta: event.metaKey,
+        ctrl: event.ctrlKey,
+      },
+      button: event.button,
+      selectableKinds: SELECTABLE_BY_WORKSPACE[workspace] ?? DEFAULT_SELECTABLE,
+      pickRadius: POINT_PICK_RADIUS_PX / camera.zoom,
+    };
+  };
 
   const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>): void => {
-    const point = localPoint(event);
-    const spaceDrag = event.button === 1 || activeTool === 'pan';
+    const ctx = buildContext(event);
 
-    if (spaceDrag) {
-      panningRef.current = true;
-      lastPointerRef.current = point;
-      event.currentTarget.setPointerCapture(event.pointerId);
-      return;
-    }
+    // Middle-drag pans regardless of the active tool — universal convention.
+    const active = event.button === 1 ? panTool : tool;
+    const gesture = active.onPointerDown?.(ctx, actions);
+    if (!gesture) return;
 
-    if (event.button !== 0) return;
-    const world = screenToWorld(camera, point);
-
-    /*
-     * Grade works on points, so it picks those first and only falls back to the
-     * piece. Every other workspace selects whole pieces. The tolerance is a
-     * constant screen distance, converted to document units so it stays the same
-     * physical target at any zoom.
-     */
-    if (workspace === 'grade') {
-      const pointHit = pickPoint(pieces, world, POINT_PICK_RADIUS_PX / camera.zoom);
-      if (pointHit) {
-        select(pointRef(pointHit.pieceId, pointHit.pointId), event.shiftKey);
-        return;
-      }
-    }
-
-    const hit = pickPiece(pieces, world);
-    if (hit) select(pieceRef(hit), event.shiftKey);
-    else if (!event.shiftKey) clearSelection();
+    gestureRef.current = gesture;
+    setGestureCursor(gesture.cursor ?? null);
+    event.currentTarget.setPointerCapture(event.pointerId);
   };
 
   const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>): void => {
-    const point = localPoint(event);
-    setCursor(screenToWorld(camera, point));
+    const ctx = buildContext(event);
+    setCursor(ctx.world);
 
-    if (!panningRef.current) return;
-    const last = lastPointerRef.current;
-    if (last) panBy({ x: point.x - last.x, y: point.y - last.y });
-    lastPointerRef.current = point;
+    const gesture = gestureRef.current;
+    if (gesture) gesture.onMove?.(ctx, actions);
+    else tool.onPointerMove?.(ctx, actions);
   };
 
-  const endPan = (event: React.PointerEvent<HTMLCanvasElement>): void => {
-    if (!panningRef.current) return;
-    panningRef.current = false;
-    lastPointerRef.current = null;
+  const endGesture = (event: React.PointerEvent<HTMLCanvasElement>): void => {
+    const gesture = gestureRef.current;
+    if (!gesture) return;
+
+    gesture.onEnd?.(buildContext(event), actions);
+    gestureRef.current = null;
+    setGestureCursor(null);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -169,11 +225,15 @@ export const CanvasStage = () => {
       ref={canvasRef}
       className="stage"
       data-tool={activeTool}
+      style={{ cursor: gestureCursor ?? tool.cursor }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
-      onPointerUp={endPan}
-      onPointerCancel={endPan}
-      onPointerLeave={() => setCursor(null)}
+      onPointerUp={endGesture}
+      onPointerCancel={endGesture}
+      onPointerLeave={() => {
+        setCursor(null);
+        setHover(null);
+      }}
     />
   );
 };

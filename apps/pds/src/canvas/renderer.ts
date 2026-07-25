@@ -20,6 +20,9 @@ export interface Scene {
   readonly pieces: readonly PatternPiece[];
   readonly selectedPieceIds: ReadonlySet<PieceId>;
   readonly selectedPointIds: ReadonlySet<PointId>;
+  /** What the pointer is over, for hover feedback. */
+  readonly hoveredPieceId: PieceId | null;
+  readonly hoveredPointId: PointId | null;
 }
 
 export interface RenderOptions {
@@ -184,6 +187,8 @@ const drawPiece = (
   layers: LayerVisibility,
   selectedPointIds: ReadonlySet<PointId>,
   highlightGradePoints: boolean,
+  hovered: boolean,
+  hoveredPointId: PointId | null,
 ): void => {
   if (piece.points.length === 0) return;
 
@@ -197,6 +202,15 @@ const drawPiece = (
   }
 
   if (layers.net) {
+    // Hover reads as a soft halo beneath the outline, so selection still wins.
+    if (hovered && !selected) {
+      tracePiece(ctx, piece, camera);
+      ctx.strokeStyle = theme.hover;
+      ctx.lineWidth = 4;
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+
     tracePiece(ctx, piece, camera);
     ctx.strokeStyle = selected ? theme.outlineSelected : theme.outline;
     ctx.lineWidth = selected ? 2 : 1.5;
@@ -215,7 +229,15 @@ const drawPiece = (
 
       const p = worldToScreen(camera, point.position);
       const isSelected = selectedPointIds.has(point.id);
+      const isHovered = hoveredPointId === point.id;
       const isGradePoint = highlightGradePoints && point.gradeRuleId !== undefined;
+
+      if (isHovered && !isSelected) {
+        ctx.beginPath();
+        ctx.fillStyle = theme.hover;
+        ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
       // Selection halo, so a picked point reads at a glance.
       if (isSelected) {
@@ -277,6 +299,8 @@ export const renderScene = (
       options.layers,
       scene.selectedPointIds,
       options.highlightGradePoints,
+      scene.hoveredPieceId === piece.id,
+      scene.hoveredPointId,
     );
   }
 

@@ -17,4 +17,18 @@ export type { Scene, RenderOptions } from './renderer';
 export { DARK_CANVAS_THEME } from './theme';
 export type { CanvasTheme } from './theme';
 export { useCanvasSurface } from './useCanvasSurface';
+export {
+  getTool,
+  hasTool,
+  registerTool,
+  selectTool,
+  panTool,
+} from './tools';
+export type {
+  CanvasTool,
+  ToolContext,
+  ToolActions,
+  ToolGesture,
+  PointerModifiers,
+} from './tools';
 export type { Surface } from './useCanvasSurface';

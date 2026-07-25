@@ -133,6 +133,23 @@ React, state or rendering. The shape is topological rather than coordinate-first
   produces it, so measurements are derived from the pattern rather than typed in
   beside it.
 
+## Canvas interaction
+
+The canvas host (`components/CanvasStage.tsx`) owns the surface, the render loop
+and pointer plumbing — nothing else. Interaction behaviour lives in
+`canvas/tools/`, where a `CanvasTool` is a plain object of optional handlers:
+no React, no store access, no DOM. Everything it needs arrives in a
+`ToolContext`; everything it changes goes through `ToolActions`.
+
+A drag returns a `ToolGesture` from `onPointerDown`, so drag state lives in the
+gesture's closure rather than as refs in the host. Adding a drafting tool means
+writing a tool and calling `registerTool` — the host, the tool dock and the
+workspace modules stay untouched.
+
+What each workspace lets you pick is declared as `selectableKinds`, so Grade
+picks grade points before the piece beneath them without the tool knowing which
+workspace is active.
+
 ## Selection
 
 Selection is shared state in its own store, not a field on the document — it is

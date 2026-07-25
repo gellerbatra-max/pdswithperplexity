@@ -46,10 +46,14 @@ export const boundarySegments = (piece: PatternPiece): PieceSegment[] =>
     .filter((segment): segment is PieceSegment => segment !== undefined);
 
 /**
- * The outline as a flat polyline, curves subdivided. This is the canonical
- * input for bounds, hit testing and length measurement.
+ * Flattened-outline cache. Pieces are immutable, so a piece object is a valid
+ * cache key for its own geometry: any edit produces a new object and misses.
+ * This matters because hover hit-testing re-flattens every piece on every
+ * pointer move, and each piece is well over a hundred sampled points.
  */
-export const outlinePoints = (piece: PatternPiece): Vec2[] => {
+const outlineCache = new WeakMap<PatternPiece, Vec2[]>();
+
+const computeOutline = (piece: PatternPiece): Vec2[] => {
   const segments = boundarySegments(piece);
   if (segments.length === 0) return [];
 
@@ -65,6 +69,20 @@ export const outlinePoints = (piece: PatternPiece): Vec2[] => {
     out.push(...flattenSegment(ends[0], ends[1], segment.geometry));
   }
   return out;
+};
+
+/**
+ * The outline as a flat polyline, curves subdivided. This is the canonical
+ * input for bounds, hit testing and length measurement.
+ *
+ * The returned array is cached and shared — treat it as read-only.
+ */
+export const outlinePoints = (piece: PatternPiece): Vec2[] => {
+  const cached = outlineCache.get(piece);
+  if (cached) return cached;
+  const computed = computeOutline(piece);
+  outlineCache.set(piece, computed);
+  return computed;
 };
 
 /** Coordinates for a run of point ids — internal lines, measurement refs. */
