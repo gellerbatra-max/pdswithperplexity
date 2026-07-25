@@ -1,4 +1,5 @@
 import type { PatternDocument } from '@/pattern';
+import { aamaAdapter, astmAdapter } from './dxf';
 import { jsonAdapter } from './json';
 import type { FormatAdapter, FormatDescriptor, FormatId } from './types';
 
@@ -15,8 +16,10 @@ const planned = (
 /** Format registry. Adding a format means adding an adapter here — nothing else changes. */
 const ADAPTERS: readonly FormatAdapter[] = [
   jsonAdapter,
-  planned('dxf-aama', 'DXF (AAMA)', '.dxf', true, true),
-  planned('astm', 'DXF (ASTM)', '.dxf', true, true),
+  // Scaffolded: these reach real code that throws FormatNotImplementedError
+  // rather than a placeholder that quietly does nothing.
+  aamaAdapter,
+  astmAdapter,
   planned('svg', 'SVG', '.svg', false, true),
   planned('pdf', 'PDF (tiled plot)', '.pdf', false, true),
 ];
@@ -43,3 +46,5 @@ export const importDocument = (payload: string, id: FormatId = 'pds-json'): Patt
 };
 
 export type { FormatAdapter, FormatDescriptor, FormatId, FormatStatus } from './types';
+export { FormatNotImplementedError, FormatParseError } from './errors';
+export * as Dxf from './dxf';

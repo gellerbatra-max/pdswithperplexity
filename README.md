@@ -80,7 +80,7 @@ apps/pds/src/
 ├── store/        Zustand stores — live document, viewport, UI state
 ├── canvas/       Camera, grid, hit testing, renderer, surface hook
 ├── geometry/     Vectors, bounds, unit conversion (mm is canonical)
-├── io/           Format adapters — native JSON today, DXF/AAMA/ASTM/SVG/PDF next
+├── io/           Format adapters — native JSON today, DXF scaffolded (see io/README.md)
 ├── ai/           Provider boundary for AI-assisted drafting, grading, audits
 └── styles/       Design tokens and application CSS
 ```

@@ -1,4 +1,5 @@
 import { WORKSPACES } from '@/features';
+import { Dxf } from '@/io';
 import {
   createEmptyDocument,
   createSeedDocument,
@@ -316,13 +317,44 @@ const fileCommands: readonly Command[] = [
     run: mock('Export PDS JSON — file output is not wired up yet'),
   },
   {
+    id: 'file.import.dxf',
+    title: 'Import DXF (AAMA/ASTM)',
+    group: 'file',
+    icon: 'folder',
+    status: 'mock',
+    keywords: ['dxf', 'aama', 'astm', 'import', 'open', 'cad', 'accumark'],
+    /*
+     * Mock import. Deliberately does not read a file or invent a document:
+     * it walks the real scaffolding and reports what an import would do, so the
+     * wiring is exercised and the gap is visible rather than papered over.
+     */
+    run: () => {
+      const plan = Dxf.describeImportPlan('aama');
+      ui().notify(
+        `${plan.label}: ${plan.steps.length}-step import over ${plan.layersRead} mapped layers — ` +
+          `blocked (${plan.layersUnverified} layer bindings unverified, no parser)`,
+      );
+    },
+  },
+  {
     id: 'file.export.dxf',
     title: 'Export DXF (AAMA)',
     group: 'file',
     icon: 'prepare',
     status: 'mock',
     keywords: ['download', 'dxf', 'aama', 'export', 'cad'],
-    run: mock('Export DXF — the AAMA adapter is not implemented yet'),
+    /* Runs the real validator, which works today, then reports the blocker. */
+    run: () => {
+      const plan = Dxf.describeExportPlan(doc().document, {
+        flavour: 'aama',
+        includeGradedSizes: false,
+      });
+      const counts = Dxf.countBySeverity(plan.issues);
+      ui().notify(
+        `${plan.label}: ${plan.blocksToWrite} pieces, ${counts.error} blocking issue(s), ` +
+          `${counts.warning} warning(s) — writer not implemented`,
+      );
+    },
   },
 ];
 
