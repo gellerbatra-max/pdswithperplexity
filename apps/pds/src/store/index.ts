@@ -1,16 +1,14 @@
 export type {
-  PieceId,
-  NodeId,
-  PieceNode,
-  Piece,
-  PatternDocument,
   SaveState,
+  LayerId,
+  LayerVisibility,
   WorkspaceId,
   ToolId,
   ToolStatus,
   ToolDescriptor,
 } from './types';
 export { WORKSPACE_IDS } from './types';
+export { createSeedDocument, createEmptyDocument, SIZE_RANGE } from './seedDocument';
 export { useDocumentStore } from './documentStore';
 export type { DocumentState } from './documentStore';
 export { useViewportStore } from './viewportStore';

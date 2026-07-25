@@ -1,5 +1,3 @@
-import { fitBounds } from '@/canvas';
-import { BoundsOps } from '@/geometry';
 import { useDocumentStore, useUiStore, useViewportStore } from '@/store';
 import { Icon } from './Icon';
 
@@ -13,26 +11,13 @@ export const StatusBar = () => {
   const cursor = useViewportStore((s) => s.cursor);
   const showGrid = useViewportStore((s) => s.showGrid);
   const toggleGrid = useViewportStore((s) => s.toggleGrid);
-  const setCamera = useViewportStore((s) => s.setCamera);
-  const resetCamera = useViewportStore((s) => s.resetCamera);
+  const fitToContent = useViewportStore((s) => s.fitToContent);
 
   const activeTool = useUiStore((s) => s.activeTool);
   const contextPanelOpen = useUiStore((s) => s.contextPanelOpen);
   const toggleContextPanel = useUiStore((s) => s.toggleContextPanel);
   const inspectorOpen = useUiStore((s) => s.inspectorOpen);
   const toggleInspector = useUiStore((s) => s.toggleInspector);
-
-  const zoomToFit = (): void => {
-    const stage = document.querySelector<HTMLCanvasElement>('.stage');
-    if (!stage) return;
-    const rect = stage.getBoundingClientRect();
-    const bounds = BoundsOps.fromPoints(pieces.flatMap((p) => p.nodes.map((n) => n.position)));
-    if (BoundsOps.isEmpty(bounds)) {
-      resetCamera();
-      return;
-    }
-    setCamera(fitBounds(bounds, rect.width, rect.height));
-  };
 
   const format = (value: number): string =>
     `${value.toFixed(unit === 'in' ? 2 : 1)}`;
@@ -85,7 +70,7 @@ export const StatusBar = () => {
 
       <span className="statusbar__divider" role="presentation" />
 
-      <button type="button" className="statusbar__button statusbar__button--text" onClick={zoomToFit}>
+      <button type="button" className="statusbar__button statusbar__button--text" onClick={fitToContent}>
         Fit
       </button>
       <span className="statusbar__item statusbar__item--zoom">

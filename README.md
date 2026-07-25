@@ -61,6 +61,33 @@ mounted across switches so the camera, selection and document view survive. Work
 layer onto it rather than replacing it, and the layer is click-through so canvas input
 is never blocked.
 
+## Document model
+
+`pattern/` owns the schema and pure read helpers; nothing in it knows about
+React, state or rendering. The shape is topological rather than coordinate-first:
+
+- **Points** are the single source of truth for position. Segments, notches,
+  internal lines, grain and grade rules all reference points by id, so moving a
+  point propagates everywhere instead of needing to be copied.
+- **Segments** are directed edges with a `SegmentGeometry` discriminated union
+  (`line`, `cubic`, `arc`) — new curve families slot in without touching
+  existing members.
+- **Pieces** hold a point pool, a segment pool and an ordered `boundary` of
+  segment ids. The indirection is what lets multi-loop pieces (a panel with a
+  cut-out) arrive later as an optional `holes` field rather than a breaking
+  change.
+- **Grading** separates the size range, reusable grade rules, and the
+  point-to-rule association — one rule is shared by many points across many
+  pieces, which is how pattern makers actually work.
+- **Measurement links** bind a spec-sheet point of measure to the geometry that
+  produces it, so measurements are derived from the pattern rather than typed in
+  beside it.
+
+`resolve.ts` and `measure.ts` hide the indirection — consumers ask for
+`outlinePoints`, `pieceBounds`, `segmentLength` or `evaluateMeasurements` and
+never walk the pools themselves. Every document carries a `schemaVersion` so
+migrations have something to branch on.
+
 ## Layout
 
 ```
@@ -72,7 +99,8 @@ apps/pds/src/
 │   ├── fit/
 │   ├── prepare/
 │   └── review/
-├── store/        Zustand stores — document, viewport, UI — and domain types
+├── pattern/      Pattern document model — schema + pure read helpers
+├── store/        Zustand stores — live document, viewport, UI state
 ├── canvas/       Camera, grid, hit testing, renderer, surface hook
 ├── geometry/     Vectors, bounds, unit conversion (mm is canonical)
 ├── io/           Format adapters — native JSON today, DXF/AAMA/ASTM/SVG/PDF next
@@ -102,7 +130,10 @@ run TypeScript without emitting.
 
 ## Status
 
-Shell complete, workspaces empty. The six regions are built and wired: the stage
+Shell and document model complete; workspaces still stubs. The app opens on a
+seed pattern — SH-2041, a ten-piece classic shirt in `store/seedDocument.ts` —
+with curved segments, grain lines, notches, internal lines, a six-size range and
+measurement links, so the model is exercised rather than described. The six regions are built and wired: the stage
 renders, pans, zooms and selects; the context panel resizes (drag or arrow keys); the
 workspace switcher, panel toggles and grid/zoom controls work; ⌘K opens the command
 surface.

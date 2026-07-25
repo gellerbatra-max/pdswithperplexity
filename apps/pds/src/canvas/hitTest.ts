@@ -1,29 +1,31 @@
 import type { Vec2 } from '@/geometry';
-import type { Piece, PieceId } from '@/store/types';
+import { outlinePoints, type PatternPiece, type PieceId } from '@/pattern';
 
-const containsPoint = (piece: Piece, p: Vec2): boolean => {
-  const nodes = piece.nodes;
+/** Even-odd ray cast against the flattened outline. */
+const containsPoint = (outline: readonly Vec2[], p: Vec2): boolean => {
   let inside = false;
-  for (let i = 0, j = nodes.length - 1; i < nodes.length; j = i++) {
-    const a = nodes[i];
-    const b = nodes[j];
+  for (let i = 0, j = outline.length - 1; i < outline.length; j = i++) {
+    const a = outline[i];
+    const b = outline[j];
     if (!a || !b) continue;
     const intersects =
-      a.position.y > p.y !== b.position.y > p.y &&
-      p.x <
-        ((b.position.x - a.position.x) * (p.y - a.position.y)) /
-          (b.position.y - a.position.y) +
-          a.position.x;
+      a.y > p.y !== b.y > p.y &&
+      p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x;
     if (intersects) inside = !inside;
   }
   return inside;
 };
 
 /** Topmost piece under a document-space point, or null. */
-export const pickPiece = (pieces: readonly Piece[], point: Vec2): PieceId | null => {
+export const pickPiece = (
+  pieces: readonly PatternPiece[],
+  point: Vec2,
+): PieceId | null => {
   for (let i = pieces.length - 1; i >= 0; i -= 1) {
     const piece = pieces[i];
-    if (piece && piece.nodes.length >= 3 && containsPoint(piece, point)) return piece.id;
+    if (!piece) continue;
+    const outline = outlinePoints(piece);
+    if (outline.length >= 3 && containsPoint(outline, point)) return piece.id;
   }
   return null;
 };

@@ -1,4 +1,4 @@
-import type { PatternDocument } from '@/store/types';
+import type { PatternDocument } from '@/pattern';
 
 export type FormatId = 'pds-json' | 'dxf-aama' | 'astm' | 'svg' | 'pdf';
 

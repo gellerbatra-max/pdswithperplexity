@@ -10,6 +10,8 @@ export interface CanvasTheme {
   readonly node: string;
   readonly nodeSelected: string;
   readonly label: string;
+  readonly grain: string;
+  readonly internal: string;
 }
 
 /** Mirrors the `--surface-sunken` / `--accent` tokens in styles/tokens.css. */
@@ -24,4 +26,6 @@ export const DARK_CANVAS_THEME: CanvasTheme = {
   node: '#8b96a5',
   nodeSelected: '#4d8dff',
   label: 'rgba(207, 216, 227, 0.72)',
+  grain: 'rgba(233, 185, 73, 0.75)',
+  internal: 'rgba(155, 200, 255, 0.55)',
 };

@@ -1,4 +1,4 @@
-import type { PatternDocument } from '@/store/types';
+import type { PatternDocument } from '@/pattern';
 
 /** Capabilities the AI layer is being built toward. */
 export type AiCapability =

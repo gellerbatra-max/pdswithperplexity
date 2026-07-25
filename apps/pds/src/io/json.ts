@@ -1,4 +1,4 @@
-import type { PatternDocument } from '@/store/types';
+import type { PatternDocument } from '@/pattern';
 import type { FormatAdapter } from './types';
 
 export const PDS_JSON_VERSION = 1;

@@ -19,7 +19,7 @@ export const DesignContext = () => {
               onClick={(event) => selectPiece(piece.id, event.shiftKey)}
             >
               <span className="list__label">{piece.name}</span>
-              <span className="list__meta">{piece.nodes.length}</span>
+              <span className="list__meta">{piece.points.length}</span>
             </button>
           </li>
         ))}

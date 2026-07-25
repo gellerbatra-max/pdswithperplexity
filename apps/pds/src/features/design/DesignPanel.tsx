@@ -25,7 +25,7 @@ export const DesignPanel = () => {
             <dt>Outline</dt>
             <dd>{piece.closed ? 'Closed' : 'Open'}</dd>
             <dt>Nodes</dt>
-            <dd>{piece.nodes.length}</dd>
+            <dd>{piece.points.length}</dd>
             <dt>Seam allowance</dt>
             <dd>{formatLength(piece.seamAllowance, document.unit)}</dd>
           </dl>

@@ -1,4 +1,4 @@
-import type { PatternDocument } from '@/store/types';
+import type { PatternDocument } from '@/pattern';
 import { jsonAdapter } from './json';
 import type { FormatAdapter, FormatDescriptor, FormatId } from './types';
 

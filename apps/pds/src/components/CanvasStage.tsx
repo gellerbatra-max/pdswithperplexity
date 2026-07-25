@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef } from 'react';
 import {
+  fitBounds,
   pickPiece,
   renderScene,
   screenToWorld,
   useCanvasSurface,
   type Scene,
 } from '@/canvas';
+import { BoundsOps } from '@/geometry';
+import { documentBounds } from '@/pattern';
 import { useDocumentStore, useUiStore, useViewportStore } from '@/store';
 
 const ZOOM_SENSITIVITY = 0.0015;
@@ -20,18 +23,31 @@ export const CanvasStage = () => {
   const panningRef = useRef(false);
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
 
-  const pieces = useDocumentStore((s) => s.document.pieces);
+  const doc = useDocumentStore((s) => s.document);
+  const pieces = doc.pieces;
   const selectedPieceIds = useDocumentStore((s) => s.selectedPieceIds);
   const selectPiece = useDocumentStore((s) => s.selectPiece);
   const clearSelection = useDocumentStore((s) => s.clearSelection);
 
   const camera = useViewportStore((s) => s.camera);
   const showGrid = useViewportStore((s) => s.showGrid);
+  const layers = useViewportStore((s) => s.layers);
+  const setCamera = useViewportStore((s) => s.setCamera);
+  const didFitRef = useRef(false);
   const panBy = useViewportStore((s) => s.panBy);
   const zoomAtPoint = useViewportStore((s) => s.zoomAtPoint);
   const setCursor = useViewportStore((s) => s.setCursor);
 
   const activeTool = useUiStore((s) => s.activeTool);
+
+  // Frame the document once, on first paint, so it never opens off-screen.
+  useEffect(() => {
+    if (didFitRef.current || surface.width === 0 || pieces.length === 0) return;
+    const bounds = documentBounds(doc);
+    if (BoundsOps.isEmpty(bounds)) return;
+    didFitRef.current = true;
+    setCamera(fitBounds(bounds, surface.width, surface.height));
+  }, [doc, pieces, surface, setCamera]);
 
   // Draw whenever the scene, camera or surface changes.
   useEffect(() => {
@@ -44,8 +60,9 @@ export const CanvasStage = () => {
       height: surface.height,
       devicePixelRatio: surface.devicePixelRatio,
       showGrid,
+      layers,
     });
-  }, [pieces, selectedPieceIds, camera, surface, showGrid]);
+  }, [pieces, selectedPieceIds, camera, surface, showGrid, layers]);
 
   // Wheel must be non-passive so the page does not scroll while zooming.
   useEffect(() => {
