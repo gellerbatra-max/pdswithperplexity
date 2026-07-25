@@ -10,7 +10,7 @@ export const InspectorPanel = () => {
   const { Panel } = workspace;
 
   return (
-    <aside className="inspector" aria-label="Inspector">
+    <aside className="inspector" aria-label="Inspector" tabIndex={-1}>
       <header className="inspector__header">
         <h2>Inspector</h2>
         <span className="badge" data-tone="muted">

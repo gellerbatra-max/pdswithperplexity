@@ -20,7 +20,7 @@ export const StageArea = () => {
   const { Stage } = workspace;
 
   return (
-    <main className="stage-area" aria-label={`${workspace.title} stage`}>
+    <main className="stage-area" aria-label={`${workspace.title} stage`} tabIndex={-1}>
       <CanvasStage />
       <div className="stage-layer" data-workspace={workspaceId}>
         <Stage />

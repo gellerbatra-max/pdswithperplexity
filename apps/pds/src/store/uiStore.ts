@@ -16,14 +16,22 @@ export interface UiState {
   contextPanelWidth: number;
   inspectorOpen: boolean;
   commandPaletteOpen: boolean;
+  /** Transient feedback from a command, surfaced in the status bar. */
+  commandNotice: string | null;
 
   setWorkspace: (workspace: WorkspaceId) => void;
   setActiveTool: (tool: ToolId) => void;
   toggleContextPanel: () => void;
+  setContextPanelOpen: (open: boolean) => void;
   setContextPanelWidth: (width: number) => void;
   toggleInspector: () => void;
+  setInspectorOpen: (open: boolean) => void;
   setCommandPaletteOpen: (open: boolean) => void;
+  notify: (message: string) => void;
 }
+
+const NOTICE_TIMEOUT = 4000;
+let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 
 export const useUiStore = create<UiState>((set) => ({
   workspace: 'design',
@@ -33,12 +41,21 @@ export const useUiStore = create<UiState>((set) => ({
   contextPanelWidth: CONTEXT_WIDTH_DEFAULT,
   inspectorOpen: true,
   commandPaletteOpen: false,
+  commandNotice: null,
 
   setWorkspace: (workspace) => set({ workspace, activeTool: 'select' }),
   setActiveTool: (activeTool) => set({ activeTool }),
 
   toggleContextPanel: () => set((state) => ({ contextPanelOpen: !state.contextPanelOpen })),
+  setContextPanelOpen: (contextPanelOpen) => set({ contextPanelOpen }),
   setContextPanelWidth: (width) => set({ contextPanelWidth: clampContextWidth(width) }),
   toggleInspector: () => set((state) => ({ inspectorOpen: !state.inspectorOpen })),
+  setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),
   setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
+
+  notify: (message) => {
+    clearTimeout(noticeTimer);
+    set({ commandNotice: message });
+    noticeTimer = setTimeout(() => set({ commandNotice: null }), NOTICE_TIMEOUT);
+  },
 }));

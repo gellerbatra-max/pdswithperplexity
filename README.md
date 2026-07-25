@@ -61,33 +61,6 @@ mounted across switches so the camera, selection and document view survive. Work
 layer onto it rather than replacing it, and the layer is click-through so canvas input
 is never blocked.
 
-## Document model
-
-`pattern/` owns the schema and pure read helpers; nothing in it knows about
-React, state or rendering. The shape is topological rather than coordinate-first:
-
-- **Points** are the single source of truth for position. Segments, notches,
-  internal lines, grain and grade rules all reference points by id, so moving a
-  point propagates everywhere instead of needing to be copied.
-- **Segments** are directed edges with a `SegmentGeometry` discriminated union
-  (`line`, `cubic`, `arc`) — new curve families slot in without touching
-  existing members.
-- **Pieces** hold a point pool, a segment pool and an ordered `boundary` of
-  segment ids. The indirection is what lets multi-loop pieces (a panel with a
-  cut-out) arrive later as an optional `holes` field rather than a breaking
-  change.
-- **Grading** separates the size range, reusable grade rules, and the
-  point-to-rule association — one rule is shared by many points across many
-  pieces, which is how pattern makers actually work.
-- **Measurement links** bind a spec-sheet point of measure to the geometry that
-  produces it, so measurements are derived from the pattern rather than typed in
-  beside it.
-
-`resolve.ts` and `measure.ts` hide the indirection — consumers ask for
-`outlinePoints`, `pieceBounds`, `segmentLength` or `evaluateMeasurements` and
-never walk the pools themselves. Every document carries a `schemaVersion` so
-migrations have something to branch on.
-
 ## Layout
 
 ```
@@ -100,6 +73,7 @@ apps/pds/src/
 │   ├── prepare/
 │   └── review/
 ├── pattern/      Pattern document model — schema + pure read helpers
+├── commands/     Command registry — plain TS, no React, no UI knowledge
 ├── store/        Zustand stores — live document, viewport, UI state
 ├── canvas/       Camera, grid, hit testing, renderer, surface hook
 ├── geometry/     Vectors, bounds, unit conversion (mm is canonical)
@@ -130,10 +104,41 @@ run TypeScript without emitting.
 
 ## Status
 
-**Design** is the first built-out workspace; Grade, Fit, Prepare and Review are
-still stubs. The app opens on a seed pattern — SH-2041, a ten-piece classic
-shirt in `store/seedDocument.ts` — so every panel reads from real geometry
-rather than parallel fixtures.
+Shell complete. **Design** is the first built-out workspace; Grade, Fit, Prepare and
+Review are still stubs.
+
+The app opens on a seed pattern — SH-2041, a ten-piece classic shirt in
+`store/seedDocument.ts` — so every panel reads from real geometry rather than
+parallel fixtures.
+
+## Document model
+
+`pattern/` owns the schema and pure read helpers; nothing in it knows about
+React, state or rendering. The shape is topological rather than coordinate-first:
+
+- **Points** are the single source of truth for position. Segments, notches,
+  internal lines, grain and grade rules all reference points by id, so moving a
+  point propagates everywhere instead of needing to be copied.
+- **Segments** are directed edges with a `SegmentGeometry` discriminated union
+  (`line`, `cubic`, `arc`) — new curve families slot in without touching
+  existing members.
+- **Pieces** hold a point pool, a segment pool and an ordered `boundary` of
+  segment ids. The indirection is what lets multi-loop pieces (a panel with a
+  cut-out) arrive later as an optional `holes` field rather than a breaking
+  change.
+- **Grading** separates the size range, reusable grade rules, and the
+  point-to-rule association — one rule is shared by many points across many
+  pieces, which is how pattern makers actually work.
+- **Measurement links** bind a spec-sheet point of measure to the geometry that
+  produces it, so measurements are derived from the pattern rather than typed in
+  beside it.
+
+`resolve.ts` and `measure.ts` hide the indirection — consumers ask for
+`outlinePoints`, `pieceBounds`, `segmentLength` or `evaluateMeasurements` and
+never walk the pools themselves. Every document carries a `schemaVersion` so
+migrations have something to branch on.
+
+**Design workspace**
 
 | Region | Contents |
 | --- | --- |
@@ -142,16 +147,19 @@ rather than parallel fixtures.
 | Right | Selection · Geometry · Piece · Construction · Measure · AI Suggestions |
 
 Real behaviour: selection syncs across tree, canvas, minimap and inspector; the
-Selection, Geometry, Construction and Measure tabs compute live from the
-document; the first four draft layers drive the renderer; block search filters;
+Selection and Geometry tabs compute live from the document (bounds, perimeter, area,
+node breakdown); the first four draft layers drive the renderer; block search filters;
 zoom controls and zoom-to-fit are wired to the camera.
 
-Mock data, clearly marked: block library, history log and AI suggestions. The six regions are built and wired: the stage
-renders, pans, zooms and selects; the context panel resizes (drag or arrow keys); the
-workspace switcher, panel toggles and grid/zoom controls work; ⌘K opens the command
-surface.
+Mock data, clearly marked: block library, history log, points of measure and AI
+suggestions. Placeholders: undo/redo (stub history store) and every drawing tool —
+the tool dock and context toolbar render them disabled. No pattern-engineering logic
+(offsetting, notching, grading, verification) exists yet.
 
-Placeholders, deliberately: undo/redo render disabled against a stub history store,
-the command palette has no index behind it, and comments/profile are non-functional.
-Unbuilt tools appear disabled in the dock so feature coverage stays visible. No
-pattern-engineering logic (offsetting, grading, verification) exists yet.
+**Command palette** — ⌘K / Ctrl+K, or the top-bar trigger. 29 commands in four
+groups (Navigation, Design, Grading, File). The registry in `commands/` is plain
+TypeScript with no React and no knowledge of the palette, so a menu or keybinding
+table could render the same list. Commands marked `mock` report into the status bar
+instead of pretending to work; commands whose preconditions fail are listed but
+greyed and skipped by arrow navigation. Search is plain substring matching over
+titles and keywords — deliberately not a scoring engine yet.

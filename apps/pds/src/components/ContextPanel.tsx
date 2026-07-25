@@ -59,6 +59,8 @@ export const ContextPanel = () => {
       className="context"
       style={{ width }}
       aria-label={`${workspace.title} context`}
+      /* Programmatically focusable so the "Focus context panel" command can land here. */
+      tabIndex={-1}
     >
       <header className="context__header">
         <h2>{workspace.title}</h2>

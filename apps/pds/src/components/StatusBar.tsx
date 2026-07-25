@@ -14,6 +14,7 @@ export const StatusBar = () => {
   const fitToContent = useViewportStore((s) => s.fitToContent);
 
   const activeTool = useUiStore((s) => s.activeTool);
+  const commandNotice = useUiStore((s) => s.commandNotice);
   const contextPanelOpen = useUiStore((s) => s.contextPanelOpen);
   const toggleContextPanel = useUiStore((s) => s.toggleContextPanel);
   const inspectorOpen = useUiStore((s) => s.inspectorOpen);
@@ -27,6 +28,12 @@ export const StatusBar = () => {
       <span className="statusbar__item statusbar__item--tool">{activeTool}</span>
       <span className="statusbar__item">{pieces.length} pieces</span>
       <span className="statusbar__item">{selectedCount} selected</span>
+
+      {commandNotice ? (
+        <span className="statusbar__notice" role="status">
+          {commandNotice}
+        </span>
+      ) : null}
 
       <span className="statusbar__spacer" />
 
