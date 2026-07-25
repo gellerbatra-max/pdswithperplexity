@@ -54,6 +54,9 @@ export type {
 } from './grading';
 export { findIncrement } from './grading';
 
+export type { NestedSize, GradeVector } from './nest';
+export { gradePiece, nestPiece, gradeVectors, pointDelta } from './nest';
+
 export type {
   MeasurementKind,
   MeasurementRef,

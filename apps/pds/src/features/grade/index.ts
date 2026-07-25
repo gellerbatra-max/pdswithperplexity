@@ -1,5 +1,6 @@
 import type { WorkspaceModule } from '../types';
 import { GradeContext } from './GradeContext';
+import { GradeDrawer } from './GradeDrawer';
 import { GradePanel } from './GradePanel';
 import { GradeStage } from './GradeStage';
 
@@ -12,6 +13,7 @@ export const gradeWorkspace: WorkspaceModule = {
   Context: GradeContext,
   Stage: GradeStage,
   Panel: GradePanel,
+  Drawer: GradeDrawer,
   tools: [
     { id: 'select', label: 'Select', hint: 'Pick pieces and grade points', status: 'available', shortcut: 'V' },
     { id: 'grade-point', label: 'Grade point', hint: 'Mark a graded node', status: 'planned' },
@@ -22,4 +24,4 @@ export const gradeWorkspace: WorkspaceModule = {
   ],
 };
 
-export { GradeContext, GradeStage, GradePanel };
+export { GradeContext, GradeStage, GradePanel, GradeDrawer };

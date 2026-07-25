@@ -52,9 +52,12 @@ any window size.
 └──────────────────────────────────────────────┘
 ```
 
-Each workspace supplies three components — `Context` (left: what is in the document),
-`Stage` (centre: what this mode draws over the document) and `Panel` (right: what is
-selected) — plus its tool set. Switching workspace swaps all four.
+Each workspace supplies `Context` (left: what is in the document), `Stage`
+(centre: what this mode draws over the document) and `Panel` (right: what is
+selected), plus its tool set — and optionally a `Drawer`, a bottom strip under
+the stage for workspaces needing a wide, table-shaped surface the inspector
+column cannot hold. Grade uses one; the others do not, and the floating stage
+chrome lifts clear only when a drawer is present.
 
 The shared canvas under the stage layer is deliberately *not* per-workspace: it stays
 mounted across switches so the camera, selection and document view survive. Workspaces
@@ -149,6 +152,25 @@ workspace modules stay untouched.
 What each workspace lets you pick is declared as `selectableKinds`, so Grade
 picks grade points before the piece beneath them without the tool knowing which
 workspace is active.
+
+## Grading
+
+`pattern/nest.ts` derives the size range by applying each point's grade rule as
+a plain translation. This is deliberately **not** correct grading — a real
+grader moves points along construction lines, keeps curves smooth through the
+nest and preserves seam lengths between mating pieces. What it provides is a
+nest with the right shape of data, so the overlay, the inspector binding and the
+drawer can be built and exercised before a solver exists.
+
+The Grade workspace nests only the selected piece, which is both how graders
+work and what keeps the per-frame cost bounded. Nested outlines draw dashed
+behind the base pattern, grade points draw as square markers, and movement
+arrows run smallest size to largest. The bottom drawer carries the size
+progression and anomaly chips, both following the shared selection; clicking a
+size there sets the active size, which the stage highlights — so the drawer
+drives the canvas as well as reflecting it.
+
+Anomaly chips are hand-written placeholders, not derived from the nest.
 
 ## Selection
 

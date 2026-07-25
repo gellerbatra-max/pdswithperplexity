@@ -13,7 +13,7 @@ export { drawGrid, gridStepFor } from './grid';
 export { pickPiece, pickPoint } from './hitTest';
 export type { PointHit } from './hitTest';
 export { renderScene } from './renderer';
-export type { Scene, RenderOptions } from './renderer';
+export type { Scene, RenderOptions, NestOverlay } from './renderer';
 export { DARK_CANVAS_THEME } from './theme';
 export type { CanvasTheme } from './theme';
 export { useCanvasSurface } from './useCanvasSurface';

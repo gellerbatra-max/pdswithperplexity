@@ -17,15 +17,25 @@ import { ToolDock } from './ToolDock';
 export const StageArea = () => {
   const workspaceId = useUiStore((s) => s.workspace);
   const workspace = getWorkspace(workspaceId);
-  const { Stage } = workspace;
+  const { Stage, Drawer } = workspace;
 
   return (
-    <main className="stage-area" aria-label={`${workspace.title} stage`} tabIndex={-1}>
+    <main
+      className="stage-area"
+      aria-label={`${workspace.title} stage`}
+      tabIndex={-1}
+      data-drawer={Drawer ? 'open' : undefined}
+    >
       <CanvasStage />
       <div className="stage-layer" data-workspace={workspaceId}>
         <Stage />
       </div>
       <ToolDock />
+      {Drawer ? (
+        <div className="stage-drawer">
+          <Drawer />
+        </div>
+      ) : null}
     </main>
   );
 };

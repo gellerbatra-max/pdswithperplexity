@@ -24,4 +24,5 @@ export interface WorkspaceModule {
   readonly Context: ComponentType;
   readonly Stage: ComponentType;
   readonly Panel: ComponentType;
+  readonly Drawer?: ComponentType;
 }

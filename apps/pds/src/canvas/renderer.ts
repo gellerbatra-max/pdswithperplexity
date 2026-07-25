@@ -1,4 +1,4 @@
-import { BoundsOps } from '@/geometry';
+import { BoundsOps, type Vec2 } from '@/geometry';
 import {
   boundarySegments,
   pieceBounds,
@@ -25,6 +25,21 @@ export interface Scene {
   readonly hoveredPointId: PointId | null;
 }
 
+/**
+ * The nested size stack drawn behind the base outline, plus the movement arrows
+ * for graded points. Built by the Grade workspace; the renderer only paints it.
+ */
+export interface NestOverlay {
+  readonly sizes: readonly {
+    readonly sizeId: string;
+    readonly label: string;
+    readonly isBase: boolean;
+    readonly isActive: boolean;
+    readonly piece: PatternPiece;
+  }[];
+  readonly vectors: readonly { readonly from: Vec2; readonly to: Vec2 }[];
+}
+
 export interface RenderOptions {
   readonly camera: Camera;
   /** Viewport size in CSS pixels. */
@@ -35,6 +50,8 @@ export interface RenderOptions {
   readonly layers: LayerVisibility;
   /** Draw graded points as grade markers — the Grade workspace's view of a piece. */
   readonly highlightGradePoints: boolean;
+  /** Present only while the Grade workspace has a piece to nest. */
+  readonly nest?: NestOverlay | undefined;
   readonly theme?: CanvasTheme;
 }
 
@@ -272,6 +289,62 @@ const drawPiece = (
   }
 };
 
+/**
+ * Nested sizes, drawn beneath everything else so the base pattern stays
+ * readable on top. The base size is skipped — it is the real outline.
+ */
+const drawNest = (
+  ctx: CanvasRenderingContext2D,
+  nest: NestOverlay,
+  camera: Camera,
+  theme: CanvasTheme,
+): void => {
+  for (const entry of nest.sizes) {
+    if (entry.isBase) continue;
+
+    tracePiece(ctx, entry.piece, camera);
+    ctx.strokeStyle = entry.isActive ? theme.nestActive : theme.nestGhost;
+    ctx.lineWidth = entry.isActive ? 1.6 : 1;
+    ctx.setLineDash(entry.isActive ? [] : [5, 4]);
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+};
+
+/** Grade-movement arrows: smallest size to largest, per graded point. */
+const drawGradeVectors = (
+  ctx: CanvasRenderingContext2D,
+  vectors: NestOverlay['vectors'],
+  camera: Camera,
+  theme: CanvasTheme,
+): void => {
+  ctx.strokeStyle = theme.gradeVector;
+  ctx.lineWidth = 1.25;
+
+  for (const vector of vectors) {
+    const a = worldToScreen(camera, vector.from);
+    const b = worldToScreen(camera, vector.to);
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+    // Below a few pixels the arrow is noise rather than information.
+    if (length < 4) continue;
+
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+
+    const angle = Math.atan2(b.y - a.y, b.x - a.x);
+    const head = Math.min(6, length * 0.4);
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y);
+    ctx.lineTo(b.x - head * Math.cos(angle - 0.45), b.y - head * Math.sin(angle - 0.45));
+    ctx.moveTo(b.x, b.y);
+    ctx.lineTo(b.x - head * Math.cos(angle + 0.45), b.y - head * Math.sin(angle + 0.45));
+    ctx.stroke();
+  }
+};
+
 /** Draws one full frame. Stateless by design — the store owns all state. */
 export const renderScene = (
   ctx: CanvasRenderingContext2D,
@@ -288,6 +361,12 @@ export const renderScene = (
   ctx.fillRect(0, 0, width, height);
 
   if (options.showGrid) drawGrid(ctx, camera, width, height, theme);
+
+  // Nest sits under the pattern; vectors sit over it but under the pieces.
+  if (options.nest) {
+    drawNest(ctx, options.nest, camera, theme);
+    drawGradeVectors(ctx, options.nest.vectors, camera, theme);
+  }
 
   for (const piece of scene.pieces) {
     drawPiece(

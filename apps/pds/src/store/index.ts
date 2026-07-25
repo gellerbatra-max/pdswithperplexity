@@ -24,6 +24,8 @@ export { useSelectionStore } from './selectionStore';
 export type { SelectionState } from './selectionStore';
 export { useViewportStore } from './viewportStore';
 export type { ViewportState } from './viewportStore';
+export { useGradeStore } from './gradeStore';
+export type { GradeState } from './gradeStore';
 export { useHistoryStore } from './historyStore';
 export type { HistoryState } from './historyStore';
 export {

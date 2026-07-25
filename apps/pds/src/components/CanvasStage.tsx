@@ -12,16 +12,18 @@ import {
   type ToolGesture,
 } from '@/canvas';
 import { BoundsOps, type Vec2 } from '@/geometry';
-import { documentBounds } from '@/pattern';
+import { documentBounds, gradeVectors, nestPiece } from '@/pattern';
 import {
   selectionKey,
   useDocumentStore,
+  useGradeStore,
   useSelectionStore,
   useUiStore,
   useViewportStore,
   type SelectionKind,
   type SelectionRef,
 } from '@/store';
+import type { NestOverlay } from '@/canvas';
 
 const ZOOM_SENSITIVITY = 0.0015;
 
@@ -74,7 +76,49 @@ export const CanvasStage = () => {
   const workspace = useUiStore((s) => s.workspace);
   const didFitRef = useRef(false);
 
+  const activeSizeId = useGradeStore((s) => s.activeSizeId);
+  const nestVisible = useGradeStore((s) => s.nestVisible);
+  const vectorsVisible = useGradeStore((s) => s.vectorsVisible);
+
   const tool = getTool(activeTool);
+
+  /*
+   * Nest overlay for the Grade workspace.
+   *
+   * Built here because the host owns the render call, and only for the selected
+   * piece — nesting all ten every frame would be wasted work, and a grader nests
+   * one piece at a time anyway. If a second workspace ever needs to paint over
+   * the stage, this is the seam to generalise into an overlay registry.
+   */
+  const nest = useMemo<NestOverlay | undefined>(() => {
+    if (workspace !== 'grade') return undefined;
+
+    const target = pieces.find((piece) => selectedPieceIds.has(piece.id));
+    if (!target) return undefined;
+
+    const sizes = nestVisible
+      ? nestPiece(target, doc.gradeRules, doc.sizeRange).map((entry) => ({
+          ...entry,
+          isActive: entry.sizeId === activeSizeId,
+        }))
+      : [];
+
+    const vectors = vectorsVisible
+      ? gradeVectors(target, doc.gradeRules, doc.sizeRange)
+      : [];
+
+    if (sizes.length === 0 && vectors.length === 0) return undefined;
+    return { sizes, vectors };
+  }, [
+    workspace,
+    pieces,
+    selectedPieceIds,
+    doc.gradeRules,
+    doc.sizeRange,
+    activeSizeId,
+    nestVisible,
+    vectorsVisible,
+  ]);
 
   /* --- Actions handed to tools ------------------------------------------- */
 
@@ -128,6 +172,7 @@ export const CanvasStage = () => {
       showGrid,
       layers,
       highlightGradePoints: workspace === 'grade',
+      nest,
     });
   }, [
     pieces,
@@ -139,6 +184,7 @@ export const CanvasStage = () => {
     showGrid,
     layers,
     workspace,
+    nest,
   ]);
 
   /* --- Wheel: viewport concern, not a tool concern ------------------------ */

@@ -15,6 +15,9 @@ export interface CanvasTheme {
   readonly gradePoint: string;
   readonly selectionHalo: string;
   readonly hover: string;
+  readonly nestGhost: string;
+  readonly nestActive: string;
+  readonly gradeVector: string;
 }
 
 /** Mirrors the `--surface-sunken` / `--accent` tokens in styles/tokens.css. */
@@ -34,4 +37,7 @@ export const DARK_CANVAS_THEME: CanvasTheme = {
   gradePoint: '#e9b949',
   selectionHalo: 'rgba(77, 141, 255, 0.28)',
   hover: 'rgba(120, 170, 255, 0.55)',
+  nestGhost: 'rgba(154, 165, 182, 0.34)',
+  nestActive: 'rgba(233, 185, 73, 0.9)',
+  gradeVector: 'rgba(233, 185, 73, 0.7)',
 };

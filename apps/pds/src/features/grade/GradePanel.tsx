@@ -2,6 +2,7 @@ import { EmptyState, Field, Value } from '@/components/Field';
 import { PanelSection } from '@/components/PanelSection';
 import { findPiece, findPoint, findIncrement } from '@/pattern';
 import { useDocumentStore, useSelectionStore } from '@/store';
+import { anomaliesFor } from './mockData';
 
 /**
  * Grade inspector, bound to the shared selection.
@@ -55,6 +56,8 @@ export const GradePanel = () => {
   const rule = point.gradeRuleId
     ? document.gradeRules.find((r) => r.id === point.gradeRuleId)
     : undefined;
+
+  const anomalies = anomaliesFor(piece.id, point.id);
 
   return (
     <>
@@ -110,6 +113,30 @@ export const GradePanel = () => {
             </table>
           </>
         )}
+      </PanelSection>
+
+      <PanelSection title="Anomalies" caption={String(anomalies.length)}>
+        {anomalies.length === 0 ? (
+          <p className="muted">Nothing flagged on this piece.</p>
+        ) : (
+          <ul className="chips chips--stacked">
+            {anomalies.map((anomaly) => (
+              <li key={anomaly.id}>
+                <span
+                  className="chip"
+                  data-severity={anomaly.severity}
+                  data-scoped={anomaly.pointId === point.id || undefined}
+                >
+                  {anomaly.label}
+                </span>
+                <p className="chip__detail">{anomaly.detail}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="muted table-note">
+          Placeholder checks — the nest is not analysed yet.
+        </p>
       </PanelSection>
     </>
   );
