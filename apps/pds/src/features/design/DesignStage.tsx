@@ -1,6 +1,21 @@
-import { StageStub } from '@/components/StageStub';
+import { ContextToolbar } from './stage/ContextToolbar';
+import { MiniMap } from './stage/MiniMap';
+import { Rulers } from './stage/Rulers';
+import { ZoomControls } from './stage/ZoomControls';
 
-/** Design draws directly on the shared canvas, so its layer only marks the mode. */
+/**
+ * Design stage chrome, layered over the shared drafting canvas.
+ *
+ * Everything here is click-through except the controls themselves, so drawing on
+ * the canvas underneath is never blocked. The canvas itself is owned by the shell.
+ */
 export const DesignStage = () => (
-  <StageStub icon="design" title="Design" note="Drafting directly on the pattern." />
+  <>
+    <Rulers />
+    <ContextToolbar />
+    <div className="stage-corner">
+      <MiniMap />
+      <ZoomControls />
+    </div>
+  </>
 );

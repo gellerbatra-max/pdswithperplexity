@@ -18,7 +18,21 @@ export type IconName =
   | 'dot'
   | 'grid'
   | 'panel-left'
-  | 'panel-right';
+  | 'panel-right'
+  | 'eye'
+  | 'eye-off'
+  | 'lock'
+  | 'unlock'
+  | 'plus'
+  | 'minus'
+  | 'maximize'
+  | 'sparkle'
+  | 'clock'
+  | 'library'
+  | 'layers'
+  | 'piece'
+  | 'ruler'
+  | 'folder';
 
 /**
  * Inline 16px stroke icons on a 24 grid. Kept in-repo rather than pulled from an
@@ -110,6 +124,80 @@ const GLYPHS: Record<IconName, ReactNode> = {
       <path d="M14 4.5v15" />
     </>
   ),
+  eye: (
+    <>
+      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" />
+      <circle cx="12" cy="12" r="2.75" />
+    </>
+  ),
+  'eye-off': (
+    <>
+      <path d="M9.9 5.8A8.5 8.5 0 0112 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 01-2.8 3.6" />
+      <path d="M6.3 7.7A16.7 16.7 0 002.5 12S6 18.5 12 18.5a8.9 8.9 0 003.9-.9" />
+      <path d="M4 4l16 16" />
+    </>
+  ),
+  lock: (
+    <>
+      <rect x="5" y="10.5" width="14" height="9.5" rx="2" />
+      <path d="M8.25 10.5V7.75a3.75 3.75 0 017.5 0v2.75" />
+    </>
+  ),
+  unlock: (
+    <>
+      <rect x="5" y="10.5" width="14" height="9.5" rx="2" />
+      <path d="M8.25 10.5V7.75a3.75 3.75 0 017.09-1.75" />
+    </>
+  ),
+  plus: <path d="M12 5.5v13M5.5 12h13" />,
+  minus: <path d="M5.5 12h13" />,
+  maximize: (
+    <>
+      <path d="M4 9V4h5" />
+      <path d="M20 15v5h-5" />
+      <path d="M15 4h5v5" />
+      <path d="M9 20H4v-5" />
+    </>
+  ),
+  sparkle: (
+    <>
+      <path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9z" />
+      <path d="M18.5 16.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" />
+    </>
+  ),
+  clock: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7v5.2l3.2 1.9" />
+    </>
+  ),
+  library: (
+    <>
+      <rect x="3.5" y="4.5" width="5" height="15" rx="1.5" />
+      <rect x="10.5" y="4.5" width="5" height="15" rx="1.5" />
+      <path d="M17.8 5.6l3 14.2" />
+    </>
+  ),
+  layers: (
+    <>
+      <path d="M12 3.5l8.5 4.5-8.5 4.5L3.5 8z" />
+      <path d="M3.5 12.5L12 17l8.5-4.5" />
+      <path d="M3.5 16.8L12 21.3l8.5-4.5" />
+    </>
+  ),
+  piece: (
+    <>
+      <path d="M5 4.5h9l5 5v10a1 1 0 01-1 1H5a1 1 0 01-1-1v-14a1 1 0 011-1z" />
+      <path d="M13.5 4.5v5.5H19" />
+    </>
+  ),
+  ruler: (
+    <>
+      <rect x="2.5" y="8" width="19" height="8" rx="1.5" />
+      <path d="M7 8v3M11 8v4M15 8v3M19 8v4" />
+    </>
+  ),
+  folder: <path d="M3.5 7a1.5 1.5 0 011.5-1.5h4l2 2.5h7A1.5 1.5 0 0119.5 9.5v8A1.5 1.5 0 0118 19H5a1.5 1.5 0 01-1.5-1.5z" />,
 };
 
 interface IconProps {

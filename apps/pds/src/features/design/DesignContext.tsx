@@ -1,29 +1,35 @@
-import { PanelSection } from '@/components/PanelSection';
+import { CollapsibleSection } from '@/components/CollapsibleSection';
 import { useDocumentStore } from '@/store';
+import { BlockLibrary } from './panels/BlockLibrary';
+import { HistoryList } from './panels/HistoryList';
+import { LayerList } from './panels/LayerList';
+import { PieceTree } from './panels/PieceTree';
+import { BLOCKS, HISTORY } from './mockData';
 
-/** Left panel: what is in the document. */
+/**
+ * Design left panel — what exists in the document, stacked as collapsible
+ * sections so all four fit one dense column.
+ */
 export const DesignContext = () => {
-  const pieces = useDocumentStore((s) => s.document.pieces);
-  const selectedPieceIds = useDocumentStore((s) => s.selectedPieceIds);
-  const selectPiece = useDocumentStore((s) => s.selectPiece);
+  const pieceCount = useDocumentStore((s) => s.document.pieces.length);
 
   return (
-    <PanelSection title="Pieces" caption={String(pieces.length)}>
-      <ul className="list">
-        {pieces.map((piece) => (
-          <li key={piece.id}>
-            <button
-              type="button"
-              className="list__row"
-              data-active={selectedPieceIds.has(piece.id) || undefined}
-              onClick={(event) => selectPiece(piece.id, event.shiftKey)}
-            >
-              <span className="list__label">{piece.name}</span>
-              <span className="list__meta">{piece.points.length}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </PanelSection>
+    <div className="stack">
+      <CollapsibleSection title="Piece Tree" caption={String(pieceCount)}>
+        <PieceTree />
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Block Library" caption={String(BLOCKS.length)} defaultOpen={false}>
+        <BlockLibrary />
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Layers">
+        <LayerList />
+      </CollapsibleSection>
+
+      <CollapsibleSection title="History" caption={String(HISTORY.length)} defaultOpen={false}>
+        <HistoryList />
+      </CollapsibleSection>
+    </div>
   );
 };

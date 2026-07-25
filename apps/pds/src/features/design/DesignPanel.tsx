@@ -1,36 +1,64 @@
-import { PanelSection } from '@/components/PanelSection';
-import { formatLength } from '@/geometry';
+import { useState } from 'react';
 import { useDocumentStore } from '@/store';
+import { AiTab } from './inspector/AiTab';
+import { ConstructionTab } from './inspector/ConstructionTab';
+import { GeometryTab } from './inspector/GeometryTab';
+import { MeasureTab } from './inspector/MeasureTab';
+import { PieceTab } from './inspector/PieceTab';
+import { SelectionTab } from './inspector/SelectionTab';
 
-/** Right inspector: properties of the current selection. */
+type TabId = 'selection' | 'geometry' | 'piece' | 'construction' | 'measure' | 'ai';
+
+interface TabDescriptor {
+  readonly id: TabId;
+  readonly label: string;
+  readonly title: string;
+}
+
+const TABS: readonly TabDescriptor[] = [
+  { id: 'selection', label: 'Selection', title: 'Selection' },
+  { id: 'geometry', label: 'Geometry', title: 'Geometry' },
+  { id: 'piece', label: 'Piece', title: 'Piece' },
+  { id: 'construction', label: 'Constr.', title: 'Construction' },
+  { id: 'measure', label: 'Measure', title: 'Measure' },
+  { id: 'ai', label: 'AI', title: 'AI Suggestions' },
+];
+
+/** Design right inspector — six tabs over the current selection. */
 export const DesignPanel = () => {
-  const document = useDocumentStore((s) => s.document);
+  const [tab, setTab] = useState<TabId>('selection');
+
+  const pieces = useDocumentStore((s) => s.document.pieces);
   const selectedPieceIds = useDocumentStore((s) => s.selectedPieceIds);
-
-  const selected = document.pieces.filter((p) => selectedPieceIds.has(p.id));
-
-  if (selected.length === 0) {
-    return (
-      <PanelSection title="Properties">
-        <p className="muted">Select a piece to edit its properties.</p>
-      </PanelSection>
-    );
-  }
+  const selected = pieces.filter((p) => selectedPieceIds.has(p.id));
 
   return (
-    <>
-      {selected.map((piece) => (
-        <PanelSection key={piece.id} title={piece.name}>
-          <dl className="props">
-            <dt>Outline</dt>
-            <dd>{piece.closed ? 'Closed' : 'Open'}</dd>
-            <dt>Nodes</dt>
-            <dd>{piece.points.length}</dd>
-            <dt>Seam allowance</dt>
-            <dd>{formatLength(piece.seamAllowance, document.unit)}</dd>
-          </dl>
-        </PanelSection>
-      ))}
-    </>
+    <div className="tabs">
+      <div className="tabs__strip" role="tablist" aria-label="Inspector sections">
+        {TABS.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            role="tab"
+            className="tabs__tab"
+            aria-selected={tab === entry.id}
+            data-active={tab === entry.id || undefined}
+            title={entry.title}
+            onClick={() => setTab(entry.id)}
+          >
+            {entry.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="tabs__body" role="tabpanel">
+        {tab === 'selection' ? <SelectionTab selected={selected} /> : null}
+        {tab === 'geometry' ? <GeometryTab selected={selected} /> : null}
+        {tab === 'piece' ? <PieceTab selected={selected} /> : null}
+        {tab === 'construction' ? <ConstructionTab selected={selected} /> : null}
+        {tab === 'measure' ? <MeasureTab /> : null}
+        {tab === 'ai' ? <AiTab /> : null}
+      </div>
+    </div>
   );
 };

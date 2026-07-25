@@ -520,7 +520,14 @@ body.is-resizing {
   transform: translateX(-50%);
   display: flex;
   gap: var(--space-0);
-  max-width: calc(100% - var(--space-6) * 2);
+  /*
+   * Stay clear of the stage's bottom-right control cluster (minimap + zoom,
+   * ~190px inc. margin) on both sides, since the dock is centred. Overflow
+   * scrolls rather than colliding.
+   */
+  max-width: calc(100% - 404px);
+  min-width: 260px;
+  scrollbar-width: none;
   padding: var(--space-1);
   overflow-x: auto;
   background: var(--surface-overlay);
@@ -528,6 +535,10 @@ body.is-resizing {
   border: 1px solid var(--border-default);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
+}
+
+.dock::-webkit-scrollbar {
+  display: none;
 }
 
 .dock__tool {

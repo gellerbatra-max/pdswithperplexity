@@ -1,7 +1,9 @@
 export { AppShell } from './AppShell';
 export { CanvasStage } from './CanvasStage';
+export { CollapsibleSection } from './CollapsibleSection';
 export { CommandPalette } from './CommandPalette';
 export { ContextPanel } from './ContextPanel';
+export { Field, FieldRow, Pair, Value, Toggle, EmptyState } from './Field';
 export { Icon } from './Icon';
 export type { IconName } from './Icon';
 export { IconButton } from './IconButton';

@@ -130,10 +130,23 @@ run TypeScript without emitting.
 
 ## Status
 
-Shell and document model complete; workspaces still stubs. The app opens on a
-seed pattern — SH-2041, a ten-piece classic shirt in `store/seedDocument.ts` —
-with curved segments, grain lines, notches, internal lines, a six-size range and
-measurement links, so the model is exercised rather than described. The six regions are built and wired: the stage
+**Design** is the first built-out workspace; Grade, Fit, Prepare and Review are
+still stubs. The app opens on a seed pattern — SH-2041, a ten-piece classic
+shirt in `store/seedDocument.ts` — so every panel reads from real geometry
+rather than parallel fixtures.
+
+| Region | Contents |
+| --- | --- |
+| Left | Piece tree (grouped by cut category), block library with search, draft layers, edit history |
+| Stage | Camera-driven rulers, selection context toolbar, minimap, zoom cluster |
+| Right | Selection · Geometry · Piece · Construction · Measure · AI Suggestions |
+
+Real behaviour: selection syncs across tree, canvas, minimap and inspector; the
+Selection, Geometry, Construction and Measure tabs compute live from the
+document; the first four draft layers drive the renderer; block search filters;
+zoom controls and zoom-to-fit are wired to the camera.
+
+Mock data, clearly marked: block library, history log and AI suggestions. The six regions are built and wired: the stage
 renders, pans, zooms and selects; the context panel resizes (drag or arrow keys); the
 workspace switcher, panel toggles and grid/zoom controls work; ⌘K opens the command
 surface.
