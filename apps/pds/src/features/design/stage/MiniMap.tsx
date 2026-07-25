@@ -1,6 +1,6 @@
 import { BoundsOps } from '@/geometry';
 import { documentBounds, pieceBounds } from '@/pattern';
-import { useDocumentStore, useViewportStore } from '@/store';
+import { useDocumentStore, useSelectionStore, useViewportStore } from '@/store';
 
 const MAP_WIDTH = 168;
 const MAP_HEIGHT = 104;
@@ -13,7 +13,7 @@ const PADDING = 8;
 export const MiniMap = () => {
   const doc = useDocumentStore((s) => s.document);
   const pieces = doc.pieces;
-  const selectedPieceIds = useDocumentStore((s) => s.selectedPieceIds);
+  const selectedPieceIds = useSelectionStore((s) => s.selectedPieceIds);
   const camera = useViewportStore((s) => s.camera);
 
   const docBounds = documentBounds(doc);

@@ -1,11 +1,18 @@
-import { useDocumentStore, useUiStore, useViewportStore } from '@/store';
+import {
+  describeSelection,
+  useDocumentStore,
+  useSelectionStore,
+  useUiStore,
+  useViewportStore,
+} from '@/store';
 import { Icon } from './Icon';
 
 /** Slim 32px footer: document readouts on the left, view controls on the right. */
 export const StatusBar = () => {
-  const unit = useDocumentStore((s) => s.document.unit);
-  const pieces = useDocumentStore((s) => s.document.pieces);
-  const selectedCount = useDocumentStore((s) => s.selectedPieceIds.size);
+  const doc = useDocumentStore((s) => s.document);
+  const unit = doc.unit;
+  const pieces = doc.pieces;
+  const selection = useSelectionStore((s) => s.selection);
 
   const camera = useViewportStore((s) => s.camera);
   const cursor = useViewportStore((s) => s.cursor);
@@ -27,7 +34,9 @@ export const StatusBar = () => {
     <footer className="statusbar">
       <span className="statusbar__item statusbar__item--tool">{activeTool}</span>
       <span className="statusbar__item">{pieces.length} pieces</span>
-      <span className="statusbar__item">{selectedCount} selected</span>
+      <span className="statusbar__item statusbar__item--selection" title="Current selection">
+        {describeSelection(doc, selection)}
+      </span>
 
       {commandNotice ? (
         <span className="statusbar__notice" role="status">

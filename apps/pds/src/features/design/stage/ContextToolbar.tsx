@@ -1,5 +1,5 @@
 import { Icon, type IconName } from '@/components/Icon';
-import { useDocumentStore } from '@/store';
+import { useDocumentStore, useSelectionStore } from '@/store';
 
 interface ContextAction {
   readonly id: string;
@@ -23,7 +23,7 @@ const ACTIONS: readonly ContextAction[] = [
  */
 export const ContextToolbar = () => {
   const pieces = useDocumentStore((s) => s.document.pieces);
-  const selectedPieceIds = useDocumentStore((s) => s.selectedPieceIds);
+  const selectedPieceIds = useSelectionStore((s) => s.selectedPieceIds);
 
   if (selectedPieceIds.size === 0) return null;
 

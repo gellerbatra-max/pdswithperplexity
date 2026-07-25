@@ -10,7 +10,8 @@ export {
   fitBounds,
 } from './camera';
 export { drawGrid, gridStepFor } from './grid';
-export { pickPiece } from './hitTest';
+export { pickPiece, pickPoint } from './hitTest';
+export type { PointHit } from './hitTest';
 export { renderScene } from './renderer';
 export type { Scene, RenderOptions } from './renderer';
 export { DARK_CANVAS_THEME } from './theme';

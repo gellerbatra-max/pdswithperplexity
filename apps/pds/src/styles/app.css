@@ -753,6 +753,15 @@ body.is-resizing {
   font-variant-numeric: tabular-nums;
 }
 
+/* Selection readout can be long; let it truncate rather than push the bar. */
+.statusbar__item--selection {
+  min-width: 0;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-secondary);
+}
+
 .statusbar__item--tool {
   color: var(--text-secondary);
   font-weight: var(--weight-medium);

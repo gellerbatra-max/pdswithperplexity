@@ -1,10 +1,10 @@
 import { getWorkspace } from '@/features';
-import { useDocumentStore, useUiStore } from '@/store';
+import { useSelectionStore, useUiStore } from '@/store';
 
 /** Right inspector — properties of the current selection. Fixed width. */
 export const InspectorPanel = () => {
   const workspaceId = useUiStore((s) => s.workspace);
-  const selectedCount = useDocumentStore((s) => s.selectedPieceIds.size);
+  const selectedCount = useSelectionStore((s) => s.selection.length);
 
   const workspace = getWorkspace(workspaceId);
   const { Panel } = workspace;

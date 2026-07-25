@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useDocumentStore } from '@/store';
+import { useDocumentStore, useSelectionStore } from '@/store';
 import { AiTab } from './inspector/AiTab';
 import { ConstructionTab } from './inspector/ConstructionTab';
 import { GeometryTab } from './inspector/GeometryTab';
@@ -29,7 +29,7 @@ export const DesignPanel = () => {
   const [tab, setTab] = useState<TabId>('selection');
 
   const pieces = useDocumentStore((s) => s.document.pieces);
-  const selectedPieceIds = useDocumentStore((s) => s.selectedPieceIds);
+  const selectedPieceIds = useSelectionStore((s) => s.selectedPieceIds);
   const selected = pieces.filter((p) => selectedPieceIds.has(p.id));
 
   return (

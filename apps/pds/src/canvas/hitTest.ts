@@ -1,5 +1,5 @@
 import type { Vec2 } from '@/geometry';
-import { outlinePoints, type PatternPiece, type PieceId } from '@/pattern';
+import { outlinePoints, type PatternPiece, type PieceId, type PointId } from '@/pattern';
 
 /** Even-odd ray cast against the flattened outline. */
 const containsPoint = (outline: readonly Vec2[], p: Vec2): boolean => {
@@ -14,6 +14,41 @@ const containsPoint = (outline: readonly Vec2[], p: Vec2): boolean => {
     if (intersects) inside = !inside;
   }
   return inside;
+};
+
+export interface PointHit {
+  readonly pieceId: PieceId;
+  readonly pointId: PointId;
+}
+
+/**
+ * Nearest point within `tolerance` document units of `point`, or null.
+ * Construction points are skipped — they position other geometry rather than
+ * being handles in their own right.
+ */
+export const pickPoint = (
+  pieces: readonly PatternPiece[],
+  point: Vec2,
+  tolerance: number,
+): PointHit | null => {
+  let best: PointHit | null = null;
+  let bestDistance = tolerance;
+
+  for (const piece of pieces) {
+    for (const candidate of piece.points) {
+      if (candidate.role === 'construction') continue;
+      const distance = Math.hypot(
+        candidate.position.x - point.x,
+        candidate.position.y - point.y,
+      );
+      if (distance <= bestDistance) {
+        bestDistance = distance;
+        best = { pieceId: piece.id, pointId: candidate.id };
+      }
+    }
+  }
+
+  return best;
 };
 
 /** Topmost piece under a document-space point, or null. */

@@ -133,6 +133,20 @@ React, state or rendering. The shape is topological rather than coordinate-first
   produces it, so measurements are derived from the pattern rather than typed in
   beside it.
 
+## Selection
+
+Selection is shared state in its own store, not a field on the document — it is
+view state, every workspace uses it, and it must survive document edits. A
+`SelectionRef` is a discriminated union (`piece`, `point`) always rooted at a
+piece, so adding `segment` or `notch` later means adding a union member and a
+resolution case, with no existing member changing.
+
+Each workspace binds its inspector to the same selection: Design shows piece
+properties, Grade shows the selected point's grade rule and per-size movement.
+A selection made in one workspace survives switching to another. Refs are pruned
+automatically when the document changes, so a selection can never outlive the
+geometry it points at.
+
 `resolve.ts` and `measure.ts` hide the indirection — consumers ask for
 `outlinePoints`, `pieceBounds`, `segmentLength` or `evaluateMeasurements` and
 never walk the pools themselves. Every document carries a `schemaVersion` so

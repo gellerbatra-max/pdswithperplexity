@@ -2,7 +2,9 @@ import { WORKSPACES } from '@/features';
 import {
   createEmptyDocument,
   createSeedDocument,
+  pieceRef,
   useDocumentStore,
+  useSelectionStore,
   useUiStore,
   useViewportStore,
 } from '@/store';
@@ -27,6 +29,7 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [
 const ui = () => useUiStore.getState();
 const doc = () => useDocumentStore.getState();
 const view = () => useViewportStore.getState();
+const selection = () => useSelectionStore.getState();
 
 /** Mock commands report back instead of silently doing nothing. */
 const mock = (message: string) => (): void => ui().notify(message);
@@ -204,7 +207,7 @@ const designCommands: readonly Command[] = [
     status: 'ready',
     keywords: ['everything'],
     isEnabled: () => doc().document.pieces.length > 0,
-    run: () => doc().setSelection(doc().document.pieces.map((p) => p.id)),
+    run: () => selection().selectMany(doc().document.pieces.map((p) => pieceRef(p.id))),
   },
   {
     id: 'design.select.clear',
@@ -213,8 +216,8 @@ const designCommands: readonly Command[] = [
     icon: 'minus',
     status: 'ready',
     keywords: ['deselect', 'none'],
-    isEnabled: () => doc().selectedPieceIds.size > 0,
-    run: () => doc().clearSelection(),
+    isEnabled: () => selection().selection.length > 0,
+    run: () => selection().clear(),
   },
 ];
 
@@ -255,7 +258,7 @@ const gradeCommands: readonly Command[] = [
     icon: 'piece',
     status: 'mock',
     keywords: ['apply', 'paste', 'rules'],
-    isEnabled: () => doc().selectedPieceIds.size > 0,
+    isEnabled: () => selection().selection.length > 0,
     run: mock('Copy grade rules — the grading engine is not built yet'),
   },
 ];

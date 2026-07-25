@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import {
   fitBounds,
   pickPiece,
+  pickPoint,
   renderScene,
   screenToWorld,
   useCanvasSurface,
@@ -9,9 +10,19 @@ import {
 } from '@/canvas';
 import { BoundsOps } from '@/geometry';
 import { documentBounds } from '@/pattern';
-import { useDocumentStore, useUiStore, useViewportStore } from '@/store';
+import {
+  pieceRef,
+  pointRef,
+  useDocumentStore,
+  useSelectionStore,
+  useUiStore,
+  useViewportStore,
+} from '@/store';
 
 const ZOOM_SENSITIVITY = 0.0015;
+
+/** Pick radius for points, in screen pixels. */
+const POINT_PICK_RADIUS_PX = 9;
 
 /**
  * The canvas is the application. Everything else is chrome arranged around it, and
@@ -25,9 +36,10 @@ export const CanvasStage = () => {
 
   const doc = useDocumentStore((s) => s.document);
   const pieces = doc.pieces;
-  const selectedPieceIds = useDocumentStore((s) => s.selectedPieceIds);
-  const selectPiece = useDocumentStore((s) => s.selectPiece);
-  const clearSelection = useDocumentStore((s) => s.clearSelection);
+  const selectedPieceIds = useSelectionStore((s) => s.selectedPieceIds);
+  const selectedPointIds = useSelectionStore((s) => s.selectedPointIds);
+  const select = useSelectionStore((s) => s.select);
+  const clearSelection = useSelectionStore((s) => s.clear);
 
   const camera = useViewportStore((s) => s.camera);
   const showGrid = useViewportStore((s) => s.showGrid);
@@ -39,6 +51,7 @@ export const CanvasStage = () => {
   const setCursor = useViewportStore((s) => s.setCursor);
 
   const activeTool = useUiStore((s) => s.activeTool);
+  const workspace = useUiStore((s) => s.workspace);
 
   // Frame the document once, on first paint, so it never opens off-screen.
   useEffect(() => {
@@ -53,7 +66,7 @@ export const CanvasStage = () => {
   useEffect(() => {
     const ctx = canvasRef.current?.getContext('2d');
     if (!ctx || surface.width === 0) return;
-    const scene: Scene = { pieces, selectedPieceIds };
+    const scene: Scene = { pieces, selectedPieceIds, selectedPointIds };
     renderScene(ctx, scene, {
       camera,
       width: surface.width,
@@ -61,8 +74,18 @@ export const CanvasStage = () => {
       devicePixelRatio: surface.devicePixelRatio,
       showGrid,
       layers,
+      highlightGradePoints: workspace === 'grade',
     });
-  }, [pieces, selectedPieceIds, camera, surface, showGrid, layers]);
+  }, [
+    pieces,
+    selectedPieceIds,
+    selectedPointIds,
+    camera,
+    surface,
+    showGrid,
+    layers,
+    workspace,
+  ]);
 
   // Wheel must be non-passive so the page does not scroll while zooming.
   useEffect(() => {
@@ -102,8 +125,23 @@ export const CanvasStage = () => {
 
     if (event.button !== 0) return;
     const world = screenToWorld(camera, point);
+
+    /*
+     * Grade works on points, so it picks those first and only falls back to the
+     * piece. Every other workspace selects whole pieces. The tolerance is a
+     * constant screen distance, converted to document units so it stays the same
+     * physical target at any zoom.
+     */
+    if (workspace === 'grade') {
+      const pointHit = pickPoint(pieces, world, POINT_PICK_RADIUS_PX / camera.zoom);
+      if (pointHit) {
+        select(pointRef(pointHit.pieceId, pointHit.pointId), event.shiftKey);
+        return;
+      }
+    }
+
     const hit = pickPiece(pieces, world);
-    if (hit) selectPiece(hit, event.shiftKey);
+    if (hit) select(pieceRef(hit), event.shiftKey);
     else if (!event.shiftKey) clearSelection();
   };
 

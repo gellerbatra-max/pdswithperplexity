@@ -1,6 +1,6 @@
 import { Icon } from '@/components/Icon';
 import type { PatternPiece, PieceCategory } from '@/pattern';
-import { useDocumentStore } from '@/store';
+import { pieceRef, useDocumentStore, useSelectionStore } from '@/store';
 
 const GROUP_LABELS: Record<PieceCategory, string> = {
   shell: 'Shell',
@@ -14,8 +14,8 @@ const GROUP_ORDER: readonly PieceCategory[] = ['shell', 'lining', 'interlining',
 /** Pieces grouped by cut category — the document's structure, not a flat list. */
 export const PieceTree = () => {
   const pieces = useDocumentStore((s) => s.document.pieces);
-  const selectedPieceIds = useDocumentStore((s) => s.selectedPieceIds);
-  const selectPiece = useDocumentStore((s) => s.selectPiece);
+  const selectedPieceIds = useSelectionStore((s) => s.selectedPieceIds);
+  const select = useSelectionStore((s) => s.select);
 
   const groups = GROUP_ORDER.map((category) => ({
     category,
@@ -39,7 +39,9 @@ export const PieceTree = () => {
                 type="button"
                 className="tree__row"
                 data-active={selected || undefined}
-                onClick={(event) => selectPiece(piece.id, event.shiftKey || event.metaKey)}
+                onClick={(event) =>
+                  select(pieceRef(piece.id), event.shiftKey || event.metaKey)
+                }
               >
                 <Icon name="piece" size={13} />
                 <span className="tree__name">{piece.name}</span>

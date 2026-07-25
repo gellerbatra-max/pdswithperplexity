@@ -9,6 +9,7 @@ import {
   segmentEndpoints,
   type PatternPiece,
   type PieceId,
+  type PointId,
 } from '@/pattern';
 import type { LayerVisibility } from '@/store/types';
 import { worldToScreen, type Camera } from './camera';
@@ -18,6 +19,7 @@ import { DARK_CANVAS_THEME, type CanvasTheme } from './theme';
 export interface Scene {
   readonly pieces: readonly PatternPiece[];
   readonly selectedPieceIds: ReadonlySet<PieceId>;
+  readonly selectedPointIds: ReadonlySet<PointId>;
 }
 
 export interface RenderOptions {
@@ -28,6 +30,8 @@ export interface RenderOptions {
   readonly devicePixelRatio: number;
   readonly showGrid: boolean;
   readonly layers: LayerVisibility;
+  /** Draw graded points as grade markers — the Grade workspace's view of a piece. */
+  readonly highlightGradePoints: boolean;
   readonly theme?: CanvasTheme;
 }
 
@@ -178,6 +182,8 @@ const drawPiece = (
   selected: boolean,
   theme: CanvasTheme,
   layers: LayerVisibility,
+  selectedPointIds: ReadonlySet<PointId>,
+  highlightGradePoints: boolean,
 ): void => {
   if (piece.points.length === 0) return;
 
@@ -204,14 +210,32 @@ const drawPiece = (
 
   // Outline nodes clutter the view when zoomed out, so they fade below a usable scale.
   if (layers.nodes && camera.zoom > 0.25) {
-    const nodeRadius = selected ? 3.5 : 2.5;
-    ctx.fillStyle = selected ? theme.nodeSelected : theme.node;
     for (const point of piece.points) {
       if (point.role === 'construction') continue;
+
       const p = worldToScreen(camera, point.position);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, nodeRadius, 0, Math.PI * 2);
-      ctx.fill();
+      const isSelected = selectedPointIds.has(point.id);
+      const isGradePoint = highlightGradePoints && point.gradeRuleId !== undefined;
+
+      // Selection halo, so a picked point reads at a glance.
+      if (isSelected) {
+        ctx.beginPath();
+        ctx.fillStyle = theme.selectionHalo;
+        ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      if (isGradePoint) {
+        // Grade points draw as squares, the way graded nests are marked on paper.
+        const half = isSelected ? 4 : 3;
+        ctx.fillStyle = isSelected ? theme.nodeSelected : theme.gradePoint;
+        ctx.fillRect(p.x - half, p.y - half, half * 2, half * 2);
+      } else {
+        ctx.beginPath();
+        ctx.fillStyle = isSelected ? theme.nodeSelected : selected ? theme.nodeSelected : theme.node;
+        ctx.arc(p.x, p.y, isSelected ? 4 : selected ? 3.5 : 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
 
@@ -244,7 +268,16 @@ export const renderScene = (
   if (options.showGrid) drawGrid(ctx, camera, width, height, theme);
 
   for (const piece of scene.pieces) {
-    drawPiece(ctx, piece, camera, scene.selectedPieceIds.has(piece.id), theme, options.layers);
+    drawPiece(
+      ctx,
+      piece,
+      camera,
+      scene.selectedPieceIds.has(piece.id),
+      theme,
+      options.layers,
+      scene.selectedPointIds,
+      options.highlightGradePoints,
+    );
   }
 
   ctx.restore();
