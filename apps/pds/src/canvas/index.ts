@@ -1,0 +1,19 @@
+export type { Camera } from './camera';
+export {
+  DEFAULT_CAMERA,
+  MIN_ZOOM,
+  MAX_ZOOM,
+  worldToScreen,
+  screenToWorld,
+  pan,
+  zoomAt,
+  fitBounds,
+} from './camera';
+export { drawGrid, gridStepFor } from './grid';
+export { pickPiece } from './hitTest';
+export { renderScene } from './renderer';
+export type { Scene, RenderOptions } from './renderer';
+export { DARK_CANVAS_THEME } from './theme';
+export type { CanvasTheme } from './theme';
+export { useCanvasSurface } from './useCanvasSurface';
+export type { Surface } from './useCanvasSurface';

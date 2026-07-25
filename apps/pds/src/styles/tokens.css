@@ -1,0 +1,89 @@
+/*
+ * Design tokens — the single source of truth for the product's visual language.
+ * Dark-mode first: the dark values are the defaults, not an override.
+ */
+:root {
+  /* --- Surfaces --------------------------------------------------------- */
+  --surface-sunken: #0a0c10;
+  --surface-app: #0e1116;
+  --surface-chrome: #13171f;
+  --surface-panel: #161b24;
+  --surface-raised: #1c222c;
+  --surface-overlay: rgba(22, 27, 36, 0.94);
+  --surface-hover: rgba(255, 255, 255, 0.05);
+  --surface-active: rgba(255, 255, 255, 0.08);
+
+  /* --- Borders ---------------------------------------------------------- */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  /* --- Text ------------------------------------------------------------- */
+  --text-primary: #e8edf4;
+  --text-secondary: #9aa5b6;
+  --text-muted: #67728a;
+  --text-inverse: #0a0c10;
+
+  /* --- Accent & status -------------------------------------------------- */
+  --accent: #4d8dff;
+  --accent-hover: #6ba0ff;
+  --accent-soft: rgba(77, 141, 255, 0.14);
+  --accent-border: rgba(77, 141, 255, 0.38);
+
+  --success: #3ecf8e;
+  --warning: #e9b949;
+  --danger: #f2637e;
+
+  /* --- Typography ------------------------------------------------------- */
+  --font-ui: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  --tracking-wide: 0.06em;
+
+  /* --- Spacing ---------------------------------------------------------- */
+  --space-0: 2px;
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 24px;
+
+  /* --- Radii ------------------------------------------------------------ */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-pill: 999px;
+
+  /* --- Elevation -------------------------------------------------------- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
+
+  /* --- Shell geometry --------------------------------------------------- */
+  --topbar-height: 56px;
+  --statusbar-height: 32px;
+  --rail-width: 64px;
+  --context-width: 264px;
+  --context-width-min: 200px;
+  --context-width-max: 420px;
+  --inspector-width: 288px;
+
+  --control-height: 28px;
+  --control-height-sm: 24px;
+
+  /* --- Motion ----------------------------------------------------------- */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 90ms;
+  --duration-base: 160ms;
+}
