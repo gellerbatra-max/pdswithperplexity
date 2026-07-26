@@ -30,6 +30,9 @@ const ZOOM_SENSITIVITY = 0.0015;
 /** Pick tolerance for points, in screen pixels. */
 const POINT_PICK_RADIUS_PX = 9;
 
+/** Below this the canvas has not been laid out yet, so an initial fit is meaningless. */
+const MIN_FIT_SURFACE_PX = 240;
+
 /**
  * What each workspace lets you pick, most specific first. Grade works on grade
  * points, so those win over the piece they sit on; everything else selects
@@ -143,7 +146,10 @@ export const CanvasStage = () => {
   /* --- Frame the document once, so it never opens off-screen -------------- */
 
   useEffect(() => {
-    if (didFitRef.current || surface.width === 0 || pieces.length === 0) return;
+    // Wait for a real layout. The first measurement can land before CSS has
+    // sized the canvas, and fitting against that would latch a useless camera.
+    const laidOut = surface.width >= MIN_FIT_SURFACE_PX && surface.height >= MIN_FIT_SURFACE_PX;
+    if (didFitRef.current || !laidOut || pieces.length === 0) return;
     const bounds = documentBounds(doc);
     if (BoundsOps.isEmpty(bounds)) return;
     didFitRef.current = true;

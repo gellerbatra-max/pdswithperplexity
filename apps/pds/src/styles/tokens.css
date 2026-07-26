@@ -1,53 +1,77 @@
 /*
  * Design tokens — the single source of truth for the product's visual language.
  * Dark-mode first: the dark values are the defaults, not an override.
+ *
+ * Two rules govern this palette:
+ *
+ *  1. The stage is the only place with strong contrast. Chrome surfaces sit
+ *     close together in value so the panels read as one calm mass and the
+ *     pattern is the brightest thing on screen.
+ *  2. Accent is for meaning, not decoration. It marks selection and focus; it
+ *     is never a background for a whole row, and never a gradient.
  */
 :root {
   /* --- Surfaces --------------------------------------------------------- */
-  --surface-sunken: #0a0c10;
-  --surface-app: #0e1116;
-  --surface-chrome: #13171f;
-  --surface-panel: #161b24;
-  --surface-raised: #1c222c;
-  --surface-overlay: rgba(22, 27, 36, 0.94);
-  --surface-hover: rgba(255, 255, 255, 0.05);
-  --surface-active: rgba(255, 255, 255, 0.08);
+  /* Darkest: the drafting stage. Everything else steps up only slightly. */
+  --surface-stage: #0b0e12;
+  --surface-sunken: #0b0e12;
+  --surface-app: #101319;
+  --surface-chrome: #14181f;
+  --surface-panel: #161a21;
+  --surface-raised: #1b2028;
+  --surface-overlay: rgba(22, 26, 33, 0.96);
+
+  /* Interaction states stay achromatic — colour is reserved for meaning. */
+  --surface-hover: rgba(255, 255, 255, 0.035);
+  --surface-active: rgba(255, 255, 255, 0.06);
+  --surface-pressed: rgba(255, 255, 255, 0.09);
 
   /* --- Borders ---------------------------------------------------------- */
-  --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-default: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.16);
+  /* Hairlines. Structure should be felt more than seen. */
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-default: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
 
   /* --- Text ------------------------------------------------------------- */
-  --text-primary: #e8edf4;
-  --text-secondary: #9aa5b6;
-  --text-muted: #67728a;
-  --text-inverse: #0a0c10;
+  --text-primary: #e4e9f0;
+  --text-secondary: #98a2b1;
+  /* Muted carries real content (codes, counts, help text) and clears AA at 5:1.
+     Faint is for incidental metadata only and sits deliberately below it. */
+  --text-muted: #808a9a;
+  --text-faint: #6d7686;
+  --text-inverse: #0b0e12;
 
-  /* --- Accent & status -------------------------------------------------- */
-  --accent: #4d8dff;
-  --accent-hover: #6ba0ff;
-  --accent-soft: rgba(77, 141, 255, 0.14);
-  --accent-border: rgba(77, 141, 255, 0.38);
+  /* --- Accent ----------------------------------------------------------- */
+  /* A restrained steel blue. Legible on the stage, quiet in the chrome. */
+  --accent: #6da3d4;
+  --accent-strong: #8bb8e0;
+  --accent-dim: #4a7ba6;
+  --accent-soft: rgba(109, 163, 212, 0.1);
+  --accent-line: rgba(109, 163, 212, 0.45);
 
-  --success: #3ecf8e;
-  --warning: #e9b949;
-  --danger: #f2637e;
+  /* --- Status ----------------------------------------------------------- */
+  /* Desaturated on purpose: these report state, they do not advertise. */
+  --success: #6b9e83;
+  --warning: #c2a058;
+  --danger: #c97182;
 
   /* --- Typography ------------------------------------------------------- */
   --font-ui: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
 
+  --text-2xs: 10px;
   --text-xs: 11px;
   --text-sm: 12px;
   --text-md: 13px;
-  --text-lg: 15px;
+  --text-lg: 14px;
 
   --weight-regular: 400;
   --weight-medium: 500;
   --weight-semibold: 600;
 
-  --tracking-wide: 0.06em;
+  --leading-tight: 1.35;
+  --leading-normal: 1.5;
+  --tracking-wide: 0.055em;
 
   /* --- Spacing ---------------------------------------------------------- */
   --space-0: 2px;
@@ -59,32 +83,34 @@
   --space-6: 24px;
 
   /* --- Radii ------------------------------------------------------------ */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 10px;
-  --radius-xl: 14px;
+  /* Small and consistent. Large radii read as consumer software. */
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+  --radius-xl: 11px;
   --radius-pill: 999px;
 
   /* --- Elevation -------------------------------------------------------- */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
 
   /* --- Shell geometry --------------------------------------------------- */
-  --topbar-height: 56px;
-  --statusbar-height: 32px;
-  --rail-width: 64px;
-  --context-width: 264px;
+  --topbar-height: 52px;
+  --statusbar-height: 30px;
+  --rail-width: 60px;
+  --context-width: 258px;
   --context-width-min: 200px;
   --context-width-max: 420px;
-  --inspector-width: 288px;
-  --drawer-height: 128px;
+  --inspector-width: 282px;
+  --drawer-height: 124px;
 
-  --control-height: 28px;
-  --control-height-sm: 24px;
+  --control-height: 26px;
+  --control-height-sm: 22px;
+  --row-height: 24px;
 
   /* --- Motion ----------------------------------------------------------- */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --duration-fast: 90ms;
-  --duration-base: 160ms;
+  --duration-fast: 80ms;
+  --duration-base: 150ms;
 }

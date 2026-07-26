@@ -19,7 +19,7 @@
 .section__header {
   display: flex;
   align-items: center;
-  height: 30px;
+  height: 28px;
   padding-right: var(--space-2);
 }
 
@@ -63,6 +63,11 @@
   padding: 0 var(--space-2) var(--space-3);
 }
 
+/* Sections read as one column, so only interior rules divide them. */
+.section:last-child {
+  border-bottom: none;
+}
+
 /* =====================================================================
    Piece tree
    ===================================================================== */
@@ -93,7 +98,7 @@
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  height: 26px;
+  height: var(--row-height);
   padding: 0 var(--space-2);
   background: transparent;
   border: none;
@@ -109,8 +114,9 @@
 }
 
 .tree__row[data-active] {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--surface-active);
+  color: var(--text-primary);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .tree__name {
@@ -123,9 +129,9 @@
 
 .tree__code {
   flex: none;
-  color: var(--text-muted);
+  color: var(--text-faint);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 
 .tree__qty {
@@ -160,7 +166,7 @@
 }
 
 .search:focus-within {
-  border-color: var(--accent-border);
+  border-color: var(--accent-line);
 }
 
 .search input {
@@ -215,8 +221,8 @@
 }
 
 .library__meta {
-  color: var(--text-muted);
-  font-size: 10px;
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
 }
 
 .library__insert {
@@ -254,7 +260,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  height: 26px;
+  height: var(--row-height);
   padding: 0 var(--space-2);
   border-radius: var(--radius-sm);
 }
@@ -356,7 +362,6 @@
 
 .history__row[data-current] .history__dot {
   background: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .history__text {
@@ -379,8 +384,8 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: var(--text-muted);
-  font-size: 10px;
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
 }
 
 .history__time {
@@ -598,19 +603,19 @@
 }
 
 .minimap__piece {
-  fill: rgba(207, 216, 227, 0.16);
-  stroke: rgba(207, 216, 227, 0.4);
+  fill: rgba(211, 218, 227, 0.1);
+  stroke: rgba(211, 218, 227, 0.26);
   stroke-width: 1;
 }
 
 .minimap__piece[data-active] {
-  fill: var(--accent-soft);
+  fill: rgba(139, 184, 224, 0.18);
   stroke: var(--accent);
 }
 
 .minimap__viewport {
-  fill: rgba(77, 141, 255, 0.08);
-  stroke: var(--accent);
+  fill: none;
+  stroke: var(--accent-line);
   stroke-width: 1;
 }
 
@@ -618,8 +623,8 @@
   position: absolute;
   left: var(--space-2);
   bottom: 4px;
-  color: var(--text-muted);
-  font-size: 9px;
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
   line-height: 1;
@@ -713,7 +718,7 @@
   padding: 0 var(--space-3);
   background: transparent;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   color: var(--text-muted);
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
@@ -726,8 +731,9 @@
 }
 
 .tabs__tab[data-active] {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--surface-active);
+  color: var(--text-primary);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .tabs__body {
@@ -767,7 +773,7 @@
   gap: 3px;
   min-height: var(--control-height-sm);
   padding: 3px var(--space-2);
-  background: var(--surface-app);
+  background: var(--surface-stage);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
@@ -785,8 +791,8 @@
 
 .value__unit {
   flex: none;
-  color: var(--text-muted);
-  font-size: 10px;
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
 }
 
 .value[data-tone='muted'] {
@@ -834,8 +840,8 @@
 }
 
 .toggle[data-on] {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-dim);
+  border-color: var(--accent-dim);
 }
 
 .toggle__knob {
@@ -847,7 +853,7 @@
 }
 
 .toggle[data-on] .toggle__knob {
-  background: #fff;
+  background: var(--text-primary);
   transform: translateX(12px);
 }
 
@@ -935,7 +941,7 @@
 
 .suggestion {
   padding: var(--space-3);
-  background: var(--surface-app);
+  background: var(--surface-stage);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
 }
@@ -952,10 +958,10 @@
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   border-radius: var(--radius-sm);
-  background: var(--accent-soft);
+  background: transparent;
   color: var(--accent);
 }
 
@@ -969,8 +975,8 @@
 
 .suggestion__confidence {
   flex: none;
-  color: var(--text-muted);
-  font-size: 10px;
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1093,9 +1099,9 @@
 }
 
 .drawer__toggles button[data-active] {
-  background: var(--accent-soft);
-  border-color: var(--accent-border);
-  color: var(--accent);
+  background: var(--surface-active);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
 }
 
 /* --- Size progression strip --- */
@@ -1118,9 +1124,9 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 74px;
+  min-width: 72px;
   padding: var(--space-2);
-  background: var(--surface-app);
+  background: var(--surface-stage);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   color: var(--text-secondary);
@@ -1132,12 +1138,12 @@
 }
 
 .progression__cell[data-base] {
-  border-color: rgba(62, 207, 142, 0.4);
+  border-color: var(--border-strong);
 }
 
 .progression__cell[data-active] {
-  background: var(--accent-soft);
-  border-color: var(--accent);
+  background: var(--surface-active);
+  border-color: var(--accent-line);
   color: var(--text-primary);
 }
 
@@ -1150,8 +1156,8 @@
 }
 
 .progression__base {
-  color: var(--success);
-  font-size: 9px;
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
   font-weight: var(--weight-regular);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -1159,7 +1165,7 @@
 
 .progression__delta {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -1198,33 +1204,33 @@
 }
 
 .chip[data-severity='error'] {
-  background: rgba(242, 99, 126, 0.14);
-  border-color: rgba(242, 99, 126, 0.4);
+  background: transparent;
+  border-color: rgba(201, 113, 130, 0.35);
   color: var(--danger);
 }
 
 .chip[data-severity='warning'] {
-  background: rgba(233, 185, 73, 0.14);
-  border-color: rgba(233, 185, 73, 0.4);
+  background: transparent;
+  border-color: rgba(194, 160, 88, 0.32);
   color: var(--warning);
 }
 
 .chip[data-severity='info'] {
-  background: var(--surface-raised);
-  border-color: var(--border-subtle);
+  background: transparent;
+  border-color: var(--border-default);
   color: var(--text-muted);
 }
 
-/* The anomaly attached to the selected point gets a ring, so the drawer and
-   the inspector agree on what is in focus. */
+/* The anomaly attached to the selected point is marked, so the drawer and the
+   inspector agree on what is in focus — a leading rule, not a glow. */
 .chip[data-scoped] {
-  box-shadow: 0 0 0 2px var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .chip__detail {
   margin: var(--space-1) 0 0;
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   line-height: 1.45;
 }
 

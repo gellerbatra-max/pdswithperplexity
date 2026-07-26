@@ -20,24 +20,31 @@ export interface CanvasTheme {
   readonly gradeVector: string;
 }
 
-/** Mirrors the `--surface-sunken` / `--accent` tokens in styles/tokens.css. */
+/*
+ * Canvas palette. Mirrors the surface and accent tokens in styles/tokens.css.
+ *
+ * The stage is the only surface allowed real contrast: pattern linework is the
+ * brightest thing in the app, and the grid sits far enough back that it never
+ * competes with it. Accents here run slightly stronger than the chrome tokens
+ * because they must read against grey linework rather than a flat panel.
+ */
 export const DARK_CANVAS_THEME: CanvasTheme = {
-  background: '#0a0c10',
-  gridMinor: 'rgba(255, 255, 255, 0.04)',
-  gridMajor: 'rgba(255, 255, 255, 0.09)',
-  axis: 'rgba(77, 141, 255, 0.32)',
-  outline: '#cfd8e3',
-  outlineSelected: '#4d8dff',
-  seamAllowance: 'rgba(207, 216, 227, 0.3)',
-  node: '#8b96a5',
-  nodeSelected: '#4d8dff',
-  label: 'rgba(207, 216, 227, 0.72)',
-  grain: 'rgba(233, 185, 73, 0.75)',
-  internal: 'rgba(155, 200, 255, 0.55)',
-  gradePoint: '#e9b949',
-  selectionHalo: 'rgba(77, 141, 255, 0.28)',
-  hover: 'rgba(120, 170, 255, 0.55)',
-  nestGhost: 'rgba(154, 165, 182, 0.34)',
-  nestActive: 'rgba(233, 185, 73, 0.9)',
-  gradeVector: 'rgba(233, 185, 73, 0.7)',
+  background: '#0b0e12',
+  gridMinor: 'rgba(255, 255, 255, 0.028)',
+  gridMajor: 'rgba(255, 255, 255, 0.062)',
+  axis: 'rgba(109, 163, 212, 0.24)',
+  outline: '#d3dae3',
+  outlineSelected: '#8bb8e0',
+  seamAllowance: 'rgba(211, 218, 227, 0.22)',
+  node: '#7b8595',
+  nodeSelected: '#8bb8e0',
+  label: 'rgba(211, 218, 227, 0.62)',
+  grain: 'rgba(194, 160, 88, 0.62)',
+  internal: 'rgba(140, 176, 210, 0.42)',
+  gradePoint: '#c2a058',
+  selectionHalo: 'rgba(139, 184, 224, 0.22)',
+  hover: 'rgba(139, 184, 224, 0.4)',
+  nestGhost: 'rgba(152, 162, 177, 0.26)',
+  nestActive: 'rgba(194, 160, 88, 0.8)',
+  gradeVector: 'rgba(194, 160, 88, 0.6)',
 };

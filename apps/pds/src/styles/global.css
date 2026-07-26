@@ -17,8 +17,8 @@ body {
   background: var(--surface-app);
   color: var(--text-primary);
   font-family: var(--font-ui);
-  font-size: var(--text-md);
-  line-height: 1.45;
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow: hidden;
@@ -42,9 +42,18 @@ h3 {
   font-weight: var(--weight-semibold);
 }
 
+/* A hairline ring, not a chunky highlight. */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 1px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* Numeric readouts must not jitter as values change. */
+.value,
+.data-table .num,
+.statusbar,
+.progression__delta {
+  font-variant-numeric: tabular-nums;
 }
 
 ::-webkit-scrollbar {
@@ -71,5 +80,6 @@ h3 {
 .muted {
   margin: 0;
   color: var(--text-muted);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
 }

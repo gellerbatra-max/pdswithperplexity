@@ -52,10 +52,15 @@ export const fitBounds = (
   const contentWidth = bounds.maxX - bounds.minX;
   const contentHeight = bounds.maxY - bounds.minY;
   if (!(contentWidth > 0) || !(contentHeight > 0)) return DEFAULT_CAMERA;
+  if (!(width > 0) || !(height > 0)) return DEFAULT_CAMERA;
 
-  const zoom = clampZoom(
-    Math.min((width - padding * 2) / contentWidth, (height - padding * 2) / contentHeight),
-  );
+  // Never let padding consume the viewport: on a small or not-yet-laid-out
+  // canvas that yields a negative usable size, which clamps to MIN_ZOOM and
+  // leaves the document a speck in the corner.
+  const usableWidth = Math.max(width * 0.5, width - padding * 2);
+  const usableHeight = Math.max(height * 0.5, height - padding * 2);
+
+  const zoom = clampZoom(Math.min(usableWidth / contentWidth, usableHeight / contentHeight));
   return {
     zoom,
     x: (bounds.minX + bounds.maxX) / 2 - width / (2 * zoom),
