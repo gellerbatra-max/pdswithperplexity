@@ -18,7 +18,7 @@ const PREVIEW: RecommendationAction = {
 const APPLY: RecommendationAction = {
   label: 'Apply',
   availability: 'not-implemented',
-  unavailableReason: 'Applying a recommendation needs the editing tools, which are not built.',
+  unavailableReason: 'Applying a recommendation needs the editing tools, which are not built yet.',
 };
 
 export const MOCK_RECOMMENDATIONS: readonly Recommendation[] = [

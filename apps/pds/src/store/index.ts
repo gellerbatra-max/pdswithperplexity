@@ -22,6 +22,8 @@ export {
 } from './selection';
 export { useSelectionStore } from './selectionStore';
 export type { SelectionState } from './selectionStore';
+export { LAYERS, DEFAULT_LAYER_VISIBILITY, findLayer } from './layers';
+export type { LayerDescriptor } from './layers';
 export { useViewportStore } from './viewportStore';
 export type { ViewportState } from './viewportStore';
 export { useGradeStore } from './gradeStore';

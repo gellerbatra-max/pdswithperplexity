@@ -1,4 +1,5 @@
 import type { Unit } from '@/geometry';
+import type { Severity } from '@/diagnostics';
 
 /**
  * Types shared by the DXF import and export halves.
@@ -59,11 +60,9 @@ export const DEFAULT_EXPORT_OPTIONS: Omit<DxfExportOptions, 'flavour'> = {
   includeGradedSizes: false,
 };
 
-export type IssueSeverity = 'error' | 'warning' | 'info';
-
 /** One problem found by validation, on either side of the conversion. */
 export interface ConversionIssue {
-  readonly severity: IssueSeverity;
+  readonly severity: Severity;
   readonly code: string;
   readonly message: string;
   /** Piece the issue belongs to, when it is piece-scoped. */

@@ -11,6 +11,12 @@ import type { PatternPiece, PiecePoint, PieceSegment } from './piece';
  * lengths between mating pieces — none of that happens here. What this gives is
  * a nest with the right *shape of data* so the interaction model, the overlay
  * and the inspector can be built and exercised before the solver exists.
+ *
+ * TODO(grading-math): replace `buildGraded` with a real solver — move points
+ * along their construction lines, re-fit curves through the nest rather than
+ * translating control handles, and keep mating seam lengths equal across sizes.
+ * The public surface (gradePiece / nestPiece / gradeVectors) should not change.
+ * See DEVELOPMENT.md.
  */
 
 const translate = (v: Vec2, dx: number, dy: number): Vec2 => ({ x: v.x + dx, y: v.y + dy });

@@ -25,6 +25,10 @@ const pick = (ctx: ToolContext): SelectionRef | null => {
  *
  * Dragging is intentionally inert for now. When move-and-nudge lands it becomes
  * a gesture returned from `onPointerDown`, and nothing else has to change.
+ *
+ * TODO(geometry-editing): return a gesture from onPointerDown that translates
+ * the selected points and commits one undoable edit on pointerup. Needs the
+ * command stack in store/historyStore.ts first. See DEVELOPMENT.md.
  */
 export const selectTool: CanvasTool = {
   id: 'select',

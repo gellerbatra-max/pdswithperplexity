@@ -10,14 +10,15 @@ import type { DxfFlavour } from './types';
  * one place that both halves import.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * IMPORTANT — the numbers below are PROVISIONAL.
+ * IMPORTANT — the numbers below are PROVISIONAL. They reflect widely used
+ * industry practice but have not been checked against the ASTM D6673 text, and
+ * vendors differ in the optional ranges. Shipping a converter on unverified
+ * layer numbers silently corrupts customer patterns.
  *
- * They reflect widely used industry practice, but they have not been checked
- * against the ASTM D6673 text, and vendors differ in the optional ranges.
- * Before any real implementation lands, every entry must be verified against
- * the standard and against sample files exported by AccuMark, Optitex and
- * Lectra, and `verified` flipped to true entry by entry. Shipping a converter
- * on unverified layer numbers silently corrupts customer patterns.
+ * TODO(dxf): verify every binding against ASTM D6673 and against files exported
+ * by AccuMark, Optitex and Lectra, flipping `verified` one at a time. This is
+ * the first task of any real DXF work and it blocks both directions.
+ * See DEVELOPMENT.md.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 

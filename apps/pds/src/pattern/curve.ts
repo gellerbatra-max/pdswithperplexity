@@ -32,7 +32,13 @@ export type SegmentGeometry = LineGeometry | CubicGeometry | ArcGeometry;
 
 export const LINE: LineGeometry = { kind: 'line' };
 
-/** Default flattening resolution. Fixed for now; adaptive subdivision can replace it. */
+/**
+ * Default flattening resolution.
+ *
+ * TODO(geometry-editing): make this adaptive. A fixed 16 samples over-samples
+ * short segments and visibly faceted long ones; flatness-based subdivision
+ * would fix both and cut hit-test cost. See DEVELOPMENT.md.
+ */
 export const FLATTEN_STEPS = 16;
 
 const cubicAt = (a: Vec2, c1: Vec2, c2: Vec2, b: Vec2, t: number): Vec2 => {

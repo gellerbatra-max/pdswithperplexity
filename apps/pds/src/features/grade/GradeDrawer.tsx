@@ -1,9 +1,10 @@
-import { Icon } from '@/components/Icon';
+import { Icon, type IconName } from '@/components/Icon';
 import { findPiece, findPoint, pointDelta } from '@/pattern';
 import { useDocumentStore, useGradeStore, useSelectionStore } from '@/store';
-import { anomaliesFor, type AnomalySeverity } from './mockData';
+import type { Severity } from '@/diagnostics';
+import { anomaliesFor } from './mockData';
 
-const SEVERITY_ICON: Record<AnomalySeverity, 'review' | 'grade' | 'clock'> = {
+const SEVERITY_ICON: Record<Severity, IconName> = {
   error: 'review',
   warning: 'grade',
   info: 'clock',

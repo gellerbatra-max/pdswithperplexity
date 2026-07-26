@@ -43,13 +43,15 @@ any window size.
 
 ```
 ┌──────────────────────────────────────────────┐
-│ top bar                                 56px │  product · workspace switcher ·
+│ top bar                                 52px │  product · workspace switcher ·
 ├──────┬─────────┬──────────────┬──────────────┤  title · save state · ⌘K ·
 │ rail │ context │    stage     │  inspector   │  undo/redo · comments · avatar
-│ 64px │ 200-420 │   flexible   │    288px     │
+│ 60px │ 200-420 │   flexible   │    282px     │
 ├──────┴─────────┴──────────────┴──────────────┤
-│ status bar                              32px │  tool · counts · cursor · zoom
+│ status bar                              30px │  tool · counts · cursor · zoom
 └──────────────────────────────────────────────┘
+
+Geometry comes from `styles/tokens.css`; those figures are its current values.
 ```
 
 Each workspace supplies `Context` (left: what is in the document), `Stage`
@@ -76,6 +78,7 @@ apps/pds/src/
 │   ├── prepare/
 │   └── review/
 ├── pattern/      Pattern document model — schema + pure read helpers
+├── diagnostics.ts  Shared severity + finding vocabulary
 ├── commands/     Command registry — plain TS, no React, no UI knowledge
 ├── store/        Zustand stores — live document, viewport, UI state
 ├── canvas/       Camera, grid, hit testing, renderer, surface hook
@@ -92,6 +95,15 @@ Two rules keep this clean as it grows:
 2. **Nothing calls a model or a file format directly.** `ai/` and `io/` are
    interfaces with swappable adapters behind them.
 
+## Building on this
+
+`DEVELOPMENT.md` records what is real, what is staged, and a recommended
+implementation order. Every `TODO(...)` in the source points there:
+
+```bash
+grep -rn "TODO(" apps/pds/src
+```
+
 ## Getting started
 
 ```bash
@@ -107,8 +119,9 @@ run TypeScript without emitting.
 
 ## Status
 
-Shell complete. **Design** is the first built-out workspace; Grade, Fit, Prepare and
-Review are still stubs.
+Shell complete. **Design** is the first built-out workspace; Grade is partly
+built; Fit, Prepare and Review are stubs. `DEVELOPMENT.md` has the full
+real-versus-staged breakdown.
 
 The app opens on a seed pattern — SH-2041, a ten-piece classic shirt in
 `store/seedDocument.ts` — so every panel reads from real geometry rather than

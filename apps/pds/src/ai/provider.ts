@@ -13,6 +13,11 @@ import type { AiProvider, Recommendation, RecommendationRequest } from './types'
  *
  * Nothing here calls a model. `localMockProvider` returns hand-written
  * recommendations from `mock.ts` so the UI has real data shapes to render.
+ *
+ * TODO(local-ai): add a provider backed by on-device inference. The rule checks
+ * behind most recommendations are deterministic (seam-length mismatch, ease
+ * progression) and should be written as plain analysers first — a model is only
+ * needed for the judgement calls. See DEVELOPMENT.md.
  */
 
 const matchesRequest = (

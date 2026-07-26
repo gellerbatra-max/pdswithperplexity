@@ -1,6 +1,5 @@
 import { Icon } from '@/components/Icon';
-import { useViewportStore } from '@/store';
-import { LAYERS } from '../mockData';
+import { LAYERS, useViewportStore } from '@/store';
 
 /**
  * Draft layers. The first four drive the renderer for real; the rest are declared

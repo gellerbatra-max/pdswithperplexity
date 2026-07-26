@@ -210,7 +210,10 @@ const drawPiece = (
   if (piece.points.length === 0) return;
 
   if (layers.seam && piece.seamAllowance > 0 && piece.closed) {
-    // Placeholder rendering: a widened stroke stands in until the offset solver lands.
+    // TODO(geometry-editing): replace this widened stroke with a real polygon
+    // offset. A stroke is not an offset — it does not mitre corners, handle
+    // self-intersection on concave curves, or produce a cut line we can export.
+    // See DEVELOPMENT.md.
     tracePiece(ctx, piece, camera);
     ctx.strokeStyle = theme.seamAllowance;
     ctx.lineWidth = Math.max(1, piece.seamAllowance * camera.zoom * 2);

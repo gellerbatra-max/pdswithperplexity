@@ -51,16 +51,16 @@ export type { LayerBinding, PatternConcept } from './layerMapping';
 export {
   validateForExport,
   validateImportedDocument,
-  countBySeverity,
   blocksConversion,
   summariseIssues,
 } from './validation';
+// Severity counting is shared vocabulary, not a DXF concern.
+export { countBySeverity } from '@/diagnostics';
 export type {
   DxfFlavour,
   DxfImportOptions,
   DxfExportOptions,
   DxfEntityKind,
   ConversionIssue,
-  IssueSeverity,
 } from './types';
 export { DXF_FLAVOUR_LABEL, DEFAULT_IMPORT_OPTIONS, DEFAULT_EXPORT_OPTIONS } from './types';

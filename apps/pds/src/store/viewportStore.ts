@@ -3,18 +3,8 @@ import { BoundsOps, type Bounds, type Vec2 } from '@/geometry';
 import { DEFAULT_CAMERA, fitBounds, pan, zoomAt, type Camera } from '@/canvas';
 import { documentBounds } from '@/pattern';
 import { useDocumentStore } from './documentStore';
+import { DEFAULT_LAYER_VISIBILITY } from './layers';
 import type { LayerId, LayerVisibility } from './types';
-
-const DEFAULT_LAYERS: LayerVisibility = {
-  net: true,
-  seam: true,
-  nodes: true,
-  labels: true,
-  notches: true,
-  grain: true,
-  internals: true,
-  annotation: true,
-};
 
 export interface ViewportState {
   camera: Camera;
@@ -38,7 +28,7 @@ export interface ViewportState {
 export const useViewportStore = create<ViewportState>((set) => ({
   camera: DEFAULT_CAMERA,
   showGrid: true,
-  layers: DEFAULT_LAYERS,
+  layers: DEFAULT_LAYER_VISIBILITY,
   cursor: null,
 
   setCamera: (camera) => set({ camera }),

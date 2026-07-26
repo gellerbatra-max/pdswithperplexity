@@ -314,7 +314,7 @@ const fileCommands: readonly Command[] = [
     icon: 'prepare',
     status: 'mock',
     keywords: ['download', 'json', 'export'],
-    run: mock('Export PDS JSON — file output is not wired up yet'),
+    run: mock('Export PDS JSON — file output is not built yet'),
   },
   {
     id: 'file.import.dxf',

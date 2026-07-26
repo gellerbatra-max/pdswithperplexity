@@ -1,3 +1,4 @@
+import type { Severity } from '@/diagnostics';
 import type { PieceId, PointId } from '@/pattern';
 
 /**
@@ -8,11 +9,9 @@ import type { PieceId, PointId } from '@/pattern';
  * this stands in so the chip UI and its selection binding can be built first.
  */
 
-export type AnomalySeverity = 'error' | 'warning' | 'info';
-
 export interface GradeAnomaly {
   readonly id: string;
-  readonly severity: AnomalySeverity;
+  readonly severity: Severity;
   readonly label: string;
   readonly detail: string;
   /** Scoped to a piece, and optionally to one point on it. */

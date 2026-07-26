@@ -1,4 +1,5 @@
 import { boundarySegments, findPoint, type PatternDocument, type PatternPiece } from '@/pattern';
+import { countBySeverity } from '@/diagnostics';
 import { unverifiedBindings } from './layerMapping';
 import type { ConversionIssue, DxfExportOptions, DxfFlavour } from './types';
 
@@ -156,14 +157,6 @@ export const validateImportedDocument = (
 
   return issues;
 };
-
-export const countBySeverity = (
-  issues: readonly ConversionIssue[],
-): Record<ConversionIssue['severity'], number> => ({
-  error: issues.filter((i) => i.severity === 'error').length,
-  warning: issues.filter((i) => i.severity === 'warning').length,
-  info: issues.filter((i) => i.severity === 'info').length,
-});
 
 export const blocksConversion = (issues: readonly ConversionIssue[]): boolean =>
   issues.some((issue) => issue.severity === 'error');
