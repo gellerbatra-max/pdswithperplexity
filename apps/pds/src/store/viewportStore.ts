@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { BoundsOps, type Vec2 } from '@/geometry';
+import { BoundsOps, type Bounds, type Vec2 } from '@/geometry';
 import { DEFAULT_CAMERA, fitBounds, pan, zoomAt, type Camera } from '@/canvas';
 import { documentBounds } from '@/pattern';
 import { useDocumentStore } from './documentStore';
@@ -28,6 +28,7 @@ export interface ViewportState {
   zoomAtPoint: (anchorScreen: Vec2, factor: number) => void;
   zoomBy: (factor: number) => void;
   fitToContent: () => void;
+  fitTo: (bounds: Bounds) => void;
   resetCamera: () => void;
   toggleGrid: () => void;
   toggleLayer: (id: LayerId) => void;
@@ -65,6 +66,14 @@ export const useViewportStore = create<ViewportState>((set) => ({
         ? DEFAULT_CAMERA
         : fitBounds(bounds, rect.width, rect.height),
     });
+  },
+
+  /** Frame an arbitrary region — used to reveal one piece or one suggestion's target. */
+  fitTo: (bounds) => {
+    const stage = document.querySelector<HTMLCanvasElement>('.stage');
+    const rect = stage?.getBoundingClientRect();
+    if (!rect || BoundsOps.isEmpty(bounds)) return;
+    set({ camera: fitBounds(bounds, rect.width, rect.height, 96) });
   },
 
   resetCamera: () => set({ camera: DEFAULT_CAMERA }),

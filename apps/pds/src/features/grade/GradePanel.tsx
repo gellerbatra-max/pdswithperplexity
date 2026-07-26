@@ -1,3 +1,4 @@
+import { AiSuggestions } from '@/components/AiSuggestions';
 import { EmptyState, Field, Value } from '@/components/Field';
 import { PanelSection } from '@/components/PanelSection';
 import { findPiece, findPoint, findIncrement } from '@/pattern';
@@ -32,6 +33,7 @@ export const GradePanel = () => {
     const rules = new Set(graded.map((p) => p.gradeRuleId));
 
     return (
+      <>
       <PanelSection title="Grading" caption={piece.meta.code}>
         <Field label="Piece">
           <Value value={piece.name} />
@@ -46,6 +48,8 @@ export const GradePanel = () => {
           Select an individual point to see its per-size movement.
         </p>
       </PanelSection>
+      <AiSuggestions />
+      </>
     );
   }
 
@@ -138,6 +142,8 @@ export const GradePanel = () => {
           Placeholder checks — the nest is not analysed yet.
         </p>
       </PanelSection>
+
+      <AiSuggestions />
     </>
   );
 };

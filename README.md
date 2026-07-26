@@ -81,7 +81,7 @@ apps/pds/src/
 ├── canvas/       Camera, grid, hit testing, renderer, surface hook
 ├── geometry/     Vectors, bounds, unit conversion (mm is canonical)
 ├── io/           Format adapters — native JSON today, DXF scaffolded (see io/README.md)
-├── ai/           Provider boundary for AI-assisted drafting, grading, audits
+├── ai/           Assistant layer — local-first provider boundary (see ai/README.md)
 └── styles/       Design tokens and application CSS
 ```
 

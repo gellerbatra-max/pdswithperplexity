@@ -77,43 +77,7 @@ export const HISTORY: readonly HistoryEntry[] = [
  * geometry by `evaluateMeasurements` in `@/pattern`.
  */
 
-/* --- AI suggestions --------------------------------------------------------- */
-
-export interface SuggestionEntry {
-  readonly id: string;
-  readonly title: string;
-  readonly detail: string;
-  readonly confidence: number;
-  readonly scope: string;
-}
-
-export const SUGGESTIONS: readonly SuggestionEntry[] = [
-  {
-    id: 'ai-1',
-    title: 'Reduce sleeve cap ease',
-    detail: 'Cap ease measures 42 mm against a 30–35 mm target for woven poplin. Expect setting difficulty.',
-    confidence: 0.86,
-    scope: 'Sleeve',
-  },
-  {
-    id: 'ai-2',
-    title: 'Seam allowance mismatch',
-    detail: 'Sleeve uses 12 mm while the mating armhole on Front Left uses 10 mm.',
-    confidence: 0.94,
-    scope: 'Sleeve ↔ Front Left',
-  },
-  {
-    id: 'ai-3',
-    title: 'Add balance notch',
-    detail: 'Back side seam has no balance notch between underarm and hem — 320 mm unnotched.',
-    confidence: 0.71,
-    scope: 'Back',
-  },
-  {
-    id: 'ai-4',
-    title: 'Collar stand length',
-    detail: 'Stand is 4 mm shorter than the neckline it joins. Check before grading.',
-    confidence: 0.63,
-    scope: 'Collar Stand',
-  },
-];
+/*
+ * AI suggestions used to live here. They are now `Recommendation`s served by
+ * the local provider in `@/ai`, scoped by workspace and selection.
+ */
