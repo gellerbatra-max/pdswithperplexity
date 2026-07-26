@@ -32,7 +32,17 @@ export type IconName =
   | 'layers'
   | 'piece'
   | 'ruler'
-  | 'folder';
+  | 'folder'
+  | 'cursor'
+  | 'hand'
+  | 'line'
+  | 'curve'
+  | 'notch'
+  | 'text'
+  | 'scissors'
+  | 'table'
+  | 'target'
+  | 'arrow-v';
 
 /**
  * Inline 16px stroke icons on a 24 grid. Kept in-repo rather than pulled from an
@@ -198,6 +208,67 @@ const GLYPHS: Record<IconName, ReactNode> = {
     </>
   ),
   folder: <path d="M3.5 7a1.5 1.5 0 011.5-1.5h4l2 2.5h7A1.5 1.5 0 0119.5 9.5v8A1.5 1.5 0 0118 19H5a1.5 1.5 0 01-1.5-1.5z" />,
+  cursor: (
+    <>
+      <path d="M5.5 3.5l13.5 7.4-6 1.6-2.4 5.8z" />
+    </>
+  ),
+  hand: (
+    <>
+      <path d="M9 11V5.6a1.6 1.6 0 013.2 0V11" />
+      <path d="M12.2 11V4.6a1.6 1.6 0 013.2 0V11" />
+      <path d="M15.4 11.4V6.8a1.6 1.6 0 013.2 0v7.4a6 6 0 01-6 6h-1a5 5 0 01-3.7-1.7l-3-3.4a1.6 1.6 0 012.3-2.2L9 15" />
+    </>
+  ),
+  line: <path d="M4 19.5L20 4.5" />,
+  curve: (
+    <>
+      <path d="M4 19c0-8 6.5-14 16-14" />
+      <circle cx="4" cy="19" r="1.6" />
+      <circle cx="20" cy="5" r="1.6" />
+    </>
+  ),
+  notch: (
+    <>
+      <path d="M3.5 17h17" />
+      <path d="M9.5 17l2.5-6 2.5 6" />
+    </>
+  ),
+  text: (
+    <>
+      <path d="M5 6.5V5h14v1.5" />
+      <path d="M12 5v14" />
+      <path d="M9 19h6" />
+    </>
+  ),
+  scissors: (
+    <>
+      <circle cx="6.5" cy="18" r="2.5" />
+      <circle cx="6.5" cy="6" r="2.5" />
+      <path d="M8.6 7.4L20 18" />
+      <path d="M8.6 16.6L20 6" />
+    </>
+  ),
+  table: (
+    <>
+      <rect x="3.5" y="5" width="17" height="14" rx="1.6" />
+      <path d="M3.5 10h17M9.5 10v9" />
+    </>
+  ),
+  target: (
+    <>
+      <circle cx="12" cy="12" r="7.5" />
+      <circle cx="12" cy="12" r="1.6" />
+      <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" />
+    </>
+  ),
+  'arrow-v': (
+    <>
+      <path d="M12 4v16" />
+      <path d="M8.5 7.5L12 4l3.5 3.5" />
+      <path d="M8.5 16.5L12 20l3.5-3.5" />
+    </>
+  ),
 };
 
 interface IconProps {

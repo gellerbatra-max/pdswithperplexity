@@ -1,3 +1,7 @@
+// Type-only import: no runtime dependency, but it makes a mistyped icon name a
+// build error rather than a silently missing glyph.
+import type { IconName } from '@/components/Icon';
+
 /**
  * UI and view state types.
  *
@@ -38,6 +42,8 @@ export type ToolStatus = 'available' | 'planned';
 export interface ToolDescriptor {
   readonly id: ToolId;
   readonly label: string;
+  /** The dock is icon-first; labels live in the tooltip and the accessible name. */
+  readonly icon: IconName;
   readonly hint: string;
   readonly status: ToolStatus;
   /** Single-key accelerator, when the tool has one. */

@@ -13,11 +13,11 @@ export const prepareWorkspace: WorkspaceModule = {
   Stage: PrepareStage,
   Panel: PreparePanel,
   tools: [
-    { id: 'select', label: 'Select', hint: 'Pick pieces to prepare', status: 'available', shortcut: 'V' },
-    { id: 'cut-parts', label: 'Cut parts', hint: 'Quantity, fold, mirror', status: 'planned' },
-    { id: 'piece-data', label: 'Piece data', hint: 'Codes, fabric, category', status: 'planned' },
-    { id: 'marker-handoff', label: 'Marker handoff', hint: 'Send pieces to nesting', status: 'planned' },
-    { id: 'export', label: 'Export', hint: 'DXF-AAMA, ASTM, PDF, JSON', status: 'planned' },
+    { id: 'select', icon: 'cursor', label: 'Select', hint: 'Pick pieces to prepare', status: 'available', shortcut: 'V' },
+    { id: 'cut-parts', icon: 'scissors', label: 'Cut parts', hint: 'Quantity, fold, mirror', status: 'planned' },
+    { id: 'piece-data', icon: 'piece', label: 'Piece data', hint: 'Codes, fabric, category', status: 'planned' },
+    { id: 'marker-handoff', icon: 'layers', label: 'Marker handoff', hint: 'Send pieces to nesting', status: 'planned' },
+    { id: 'export', icon: 'prepare', label: 'Export', hint: 'DXF-AAMA, ASTM, PDF, JSON', status: 'planned' },
   ],
 };
 

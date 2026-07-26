@@ -105,6 +105,10 @@
   --inspector-width: 282px;
   --drawer-height: 124px;
 
+  /* Both panel headers share this, so their first content row lands on the
+     same baseline on either side of the stage. */
+  --panel-header-height: 48px;
+
   --control-height: 26px;
   --control-height-sm: 22px;
   --row-height: 24px;

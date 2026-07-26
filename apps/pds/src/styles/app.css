@@ -388,7 +388,11 @@ kbd {
 
 .context__header {
   flex: none;
-  padding: var(--space-4);
+  height: var(--panel-header-height);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 var(--space-4);
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -398,9 +402,12 @@ kbd {
 }
 
 .context__header p {
-  margin: var(--space-0) 0 0;
-  color: var(--text-muted);
-  font-size: var(--text-xs);
+  margin: 1px 0 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
 }
 
 .context__body {
@@ -517,57 +524,46 @@ body.is-resizing {
   color: var(--text-muted);
 }
 
-/* --- Floating tool dock --- */
+/* --- Floating tool palette --- */
 
+/*
+ * Compact enough to never collide with the bottom-right control cluster, so it
+ * needs no width cap, no overflow scrolling and no edge mask — all of which
+ * were working around labels that no longer exist.
+ */
 .dock {
   position: absolute;
   left: 50%;
   bottom: var(--space-5);
   transform: translateX(-50%);
   display: flex;
+  align-items: center;
   gap: var(--space-0);
-  /*
-   * Stay clear of the stage's bottom-right control cluster (minimap + zoom,
-   * ~190px inc. margin) on both sides, since the dock is centred. Overflow
-   * scrolls rather than colliding.
-   */
-  max-width: calc(100% - 404px);
-  min-width: 260px;
-  scrollbar-width: none;
-  /* Overflow should read as "there is more", not as a clipped label. */
-  mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    #000 var(--space-4),
-    #000 calc(100% - var(--space-5)),
-    transparent 100%
-  );
   padding: var(--space-1);
-  overflow-x: auto;
   background: var(--surface-overlay);
   backdrop-filter: blur(16px);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-lg);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
 }
 
-.dock::-webkit-scrollbar {
-  display: none;
+.dock__divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 var(--space-1);
+  background: var(--border-default);
 }
 
 .dock__tool {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  white-space: nowrap;
+  justify-content: center;
+  width: var(--control-height);
   height: var(--control-height);
-  padding: 0 var(--space-3);
   background: transparent;
   border: none;
   border-radius: var(--radius-md);
   color: var(--text-secondary);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
   transition: background var(--duration-fast) var(--ease-out);
 }
 
@@ -579,12 +575,12 @@ body.is-resizing {
 .dock__tool[data-active] {
   background: var(--surface-active);
   color: var(--text-primary);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .dock__tool:disabled {
-  color: var(--text-muted);
+  color: var(--text-faint);
   cursor: default;
-  opacity: 0.45;
 }
 
 /* =====================================================================
@@ -606,7 +602,7 @@ body.is-resizing {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  height: 45px;
+  height: var(--panel-header-height);
   padding: 0 var(--space-4);
   border-bottom: 1px solid var(--border-subtle);
 }
