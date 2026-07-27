@@ -210,6 +210,66 @@ const varied = offsetRing(square, 10, { distances: [20, 10, 10, 10] });
 const height = Math.max(...varied.map((p) => p.y)) - Math.min(...varied.map((p) => p.y));
 check('per-edge distance', Math.abs(height - 130) < 0.01, `height ${height.toFixed(2)} want 130`);
 
+/* --- Dense outline: the offset must not regress to its old O(n²) cost ------ */
+
+/**
+ * A scalloped ring at the density DEVELOPMENT.md flags as the risk case —
+ * ~1087 points from ~120 flattened segments — with real concave lobes spread
+ * around the whole outline, so loop trimming triggers repeatedly rather than
+ * at one corner. This is what a dense imported pattern with the seam
+ * allowance on looks like to the offset, not a synthetic worst case.
+ */
+const scallop = (n: number, lobes: number, radius: number, amplitude: number): V[] =>
+  Array.from({ length: n }, (_, i) => {
+    const t = (i / n) * Math.PI * 2;
+    const r = radius + amplitude * Math.sin(lobes * t);
+    return { x: radius * 1.5 + r * Math.cos(t), y: radius * 1.5 + r * Math.sin(t) };
+  });
+
+const denseOutline = scallop(1087, 8, 200, 60);
+const denseOffset = offsetRing(denseOutline, 12);
+
+check('dense outline simple', !selfIntersects(denseOffset), `${denseOffset.length} vertices`);
+check(
+  'dense outline clearance',
+  clearance(denseOffset, denseOutline) > 11.9,
+  `${clearance(denseOffset, denseOutline).toFixed(4)}`,
+);
+
+const median = (fn: () => void, iterations: number): number => {
+  const timings: number[] = [];
+  for (let i = 0; i < iterations; i += 1) {
+    const start = performance.now();
+    fn();
+    timings.push(performance.now() - start);
+  }
+  timings.sort((a, b) => a - b);
+  return timings[Math.floor(timings.length / 2)]!;
+};
+
+// Warm the JIT before timing — a drag reshapes the piece every frame, so it's
+// the steady-state cost that has to hold 60fps, not one cold call.
+for (let i = 0; i < 5; i += 1) offsetRing(denseOutline, 12);
+const denseMedian = median(() => offsetRing(denseOutline, 12), 15);
+check(
+  'dense outline stays fast',
+  denseMedian < 10,
+  `median ${denseMedian.toFixed(3)}ms over 15 calls (budget 10ms; a frame at 60fps is 16.7ms)`,
+);
+
+// The old edge-against-every-earlier-edge trim was O(n²): 4x the points cost
+// ~16x the time. A grid-accelerated trim should cost well under that; this
+// guards the growth rate rather than one absolute number, so it would still
+// catch a regression that happened to be fast at the size above.
+const biggerOutline = scallop(4 * 1087, 8, 200, 60);
+for (let i = 0; i < 3; i += 1) offsetRing(biggerOutline, 12);
+const biggerMedian = median(() => offsetRing(biggerOutline, 12), 7);
+check(
+  'offset scales sub-quadratically',
+  biggerMedian / denseMedian < 10,
+  `4x the points cost ${(biggerMedian / denseMedian).toFixed(1)}x the time (want <10x; O(n²) would give ~16x) — ${denseMedian.toFixed(3)}ms -> ${biggerMedian.toFixed(3)}ms`,
+);
+
 console.log(
   failures === 0 ? '\nAll offset checks passed.' : `\n${failures} offset check(s) FAILED.`,
 );
