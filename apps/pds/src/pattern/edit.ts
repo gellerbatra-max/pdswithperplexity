@@ -1,5 +1,5 @@
 import type { Vec2 } from '@/geometry';
-import { LINE, splitSegment, type SegmentGeometry } from './curve';
+import { LINE, resolveArc, splitSegment, tangentOnSegment, type ArcGeometry, type SegmentGeometry } from './curve';
 import { createId, type NotchId, type PointId, type SegmentId } from './ids';
 import type { Notch, NotchKind } from './annotations';
 import type { PatternPiece, PiecePoint, PieceSegment, PointRole } from './piece';
@@ -320,13 +320,16 @@ export const insertPointOnSegment = (
   const leftId = createId(`${piece.id}-s`);
   const rightId = createId(`${piece.id}-s`);
 
-  // A point cutting a curve is itself a curve point; on a straight edge it is a
-  // corner. That only drives how the renderer marks it, but getting it wrong
-  // makes the node read as the wrong kind of control.
+  // A point cutting a curve — cubic or arc — is itself a curve point: both
+  // halves stay tangent-continuous through the cut (de Casteljau for a
+  // cubic, the same circle for an arc), so the point is genuinely smooth,
+  // not a corner. Only a line has no tangent to preserve. This only drives
+  // how the renderer marks it, but getting it wrong makes the node read as
+  // the wrong kind of control.
   const point: PiecePoint = {
     id: pointId,
     position: split.at,
-    role: segment.geometry.kind === 'cubic' ? 'curve' : 'corner',
+    role: segment.geometry.kind === 'line' ? 'corner' : 'curve',
   };
 
   // Shared seam properties carry to both halves; `mateSegmentId` does not. A
@@ -418,20 +421,62 @@ export interface RemovePointResult {
 }
 
 /**
+ * How close two quantities (millimetres, or the perpendicular deviation
+ * used to test collinearity) must be to call an inverse exact.
+ *
+ * Genuine floating-point noise from de Casteljau subdivision or the arc
+ * trig in `curve.ts` sits many orders of magnitude below this for any
+ * coordinate scale a pattern piece actually uses; a real difference —
+ * anything a person or another edit could have intended — sits many orders
+ * above it. It is a threshold for "is this the same number", not a modelling
+ * tolerance.
+ */
+const EXACT_TOLERANCE_MM = 1e-6;
+
+/**
  * Removes an outline point, merging the two edges that met there into one.
  *
- * **This changes the outline, and in general it has to.** Two cubics joined end
- * to end are usually not expressible as one cubic. The merged edge keeps the
- * outer handles — the incoming edge's `control1`, the outgoing edge's
- * `control2` — rescaled to span the combined edge, which preserves the tangent
- * direction at each surviving end and recovers the original curve exactly when
- * the merge is undoing a split. Two straight edges merge exactly. Anything else
- * is an approximation whose error grows with how much the two edges disagree,
- * and undo is the only exact way back.
+ * The merge is exact whenever the pair of edges admits an exact merge, and an
+ * honest, tangent-preserving approximation otherwise. Four cases, in the
+ * order this checks them:
  *
- * Notches are re-anchored onto the merged edge by arc-length proportion, which
- * keeps them near where they were without claiming more precision than the
- * merge itself has.
+ * - **Line + line** merges to a single `LINE` exactly. There is no curve
+ *   fit involved — a straight edge between the surviving endpoints is all a
+ *   line ever was — though if the removed point was a real corner rather
+ *   than a split undone, the outline itself changes (the corner is cut),
+ *   which is the point of removing it.
+ * - **Arc + arc on the same circle** — matching centre, radius and
+ *   direction — merges to a single arc spanning both sweeps exactly, the
+ *   same identity `splitSegment` uses in reverse: two arcs of one circle
+ *   are one arc of that circle, full stop, independent of how they came to
+ *   be adjacent.
+ * - **Cubic + cubic whose shared handles are collinear through the joint**
+ *   merges to a single cubic exactly, recovering the pre-split curve. De
+ *   Casteljau subdivision leaves the inner handles and the joint collinear,
+ *   with the joint dividing them in exactly the split ratio — checking that
+ *   collinearity, not just that *some* ratio can be computed from the
+ *   distances involved, is what tells an undone split apart from two
+ *   cubics that were drawn independently and merely happen to meet. The
+ *   latter do not admit an exact merge, and treating their handles as if
+ *   they did would silently claim a precision the result does not have.
+ * - **Everything else** — mixed kinds, non-cocircular arcs, non-collinear
+ *   cubics — merges to an approximate cubic. Its handles are not arbitrary:
+ *   each points along the *true* tangent of whichever original edge left
+ *   the surviving endpoint (a line's constant direction, an arc's exact
+ *   tangent, or a cubic's own handle), so an arc or line on one side of the
+ *   merge is never silently treated as if it were the straight chord
+ *   between the two surviving points. Only the handle's *reach* — a third
+ *   of the merged chord — is a convention, the same one `chordHandles` uses
+ *   for a fresh line → curve.
+ *
+ * Notches are re-anchored using the same share as the geometry above:
+ * the exact split ratio when one was found, or arc-length share otherwise.
+ * Arc-length share is not just a fallback here — it is *exact* for the line
+ * and arc cases too, because parameter is proportional to length on
+ * anything but a cubic. Only the cubic case genuinely needs the split ratio
+ * instead, which is why both draw from the one `share` value rather than
+ * notches quietly using a different, weaker proportion than the geometry
+ * they are meant to be riding on.
  *
  * Returns null when `pointRemovalBlocker` would refuse.
  */
@@ -451,44 +496,73 @@ export const removePoint = (
 
   const from = piece.points.find((p) => p.id === incoming.from);
   const to = piece.points.find((p) => p.id === outgoing.to);
-  if (!from || !to) return null;
+  const joint = piece.points.find((p) => p.id === pointId);
+  if (!from || !to || !joint) return null;
 
-  const bothStraight =
-    incoming.geometry.kind !== 'cubic' && outgoing.geometry.kind !== 'cubic';
+  const bothLines = incoming.geometry.kind === 'line' && outgoing.geometry.kind === 'line';
 
-  /*
-   * The parameter at which the merged edge is divided.
-   *
-   * When two cubics were produced by splitting one, de Casteljau leaves the
-   * inner handles and the joint collinear, with the joint dividing them in
-   * exactly the split ratio. Reading that ratio back recovers the original
-   * split parameter, which is what makes the rescale below exact for a merge
-   * that undoes a split.
-   *
-   * Arc-length share is the fallback: it is a reasonable estimate for edges
-   * that were never halves of one curve, and for the mixed straight/curved case
-   * where no such collinearity exists.
-   */
   const incomingLength = segmentLength(piece, incoming);
   const outgoingLength = segmentLength(piece, outgoing);
   const total = incomingLength + outgoingLength;
   const arcShare = total > 0 ? incomingLength / total : 0.5;
 
+  /*
+   * The parameter at which the merged cubic is divided, found only when the
+   * two cubics are truly one curve cut in half.
+   *
+   * When two cubics were produced by splitting one, de Casteljau leaves the
+   * inner handles and the joint exactly collinear, with the joint dividing
+   * them in exactly the split ratio — so this both verifies the collinearity
+   * (rejecting two cubics that only happen to meet) and reads the ratio back
+   * from it in the same step.
+   */
   const jointRatio = ((): number | null => {
     if (incoming.geometry.kind !== 'cubic' || outgoing.geometry.kind !== 'cubic') return null;
     const d = incoming.geometry.control2;
     const e = outgoing.geometry.control1;
-    const joint = piece.points.find((p) => p.id === pointId);
-    if (!joint) return null;
     const span = Math.hypot(e.x - d.x, e.y - d.y);
     if (span < 1e-9) return null;
+
+    const dx = e.x - d.x;
+    const dy = e.y - d.y;
+    const perpendicular = Math.abs((joint.position.x - d.x) * dy - (joint.position.y - d.y) * dx) / span;
+    if (perpendicular > EXACT_TOLERANCE_MM) return null;
+
     const ratio = Math.hypot(joint.position.x - d.x, joint.position.y - d.y) / span;
     return ratio > 1e-6 && ratio < 1 - 1e-6 ? ratio : null;
   })();
 
+  /**
+   * A single arc spanning both sweeps, found only when the two arcs sit on
+   * the same circle in the same direction — the condition that makes a
+   * one-arc merge exact rather than approximate.
+   */
+  const arcMerge = ((): ArcGeometry | null => {
+    if (incoming.geometry.kind !== 'arc' || outgoing.geometry.kind !== 'arc') return null;
+    if (incoming.geometry.clockwise !== outgoing.geometry.clockwise) return null;
+
+    const first = resolveArc(from.position, joint.position, incoming.geometry);
+    const second = resolveArc(joint.position, to.position, outgoing.geometry);
+    if (!first || !second) return null;
+
+    const sameCentre =
+      Math.hypot(first.centre.x - second.centre.x, first.centre.y - second.centre.y) <=
+      EXACT_TOLERANCE_MM;
+    const sameRadius = Math.abs(first.radius - second.radius) <= EXACT_TOLERANCE_MM;
+    if (!sameCentre || !sameRadius) return null;
+
+    const sweep = first.sweep + second.sweep;
+    return {
+      kind: 'arc',
+      radius: first.radius,
+      largeArc: Math.abs(sweep) > Math.PI,
+      clockwise: incoming.geometry.clockwise,
+    };
+  })();
+
   const share = jointRatio ?? arcShare;
 
-  /** Pushes a handle out from its anchor so it spans the merged edge. */
+  /** Pushes a cubic handle out from its anchor so it spans the merged edge. */
   const rescale = (anchor: Vec2, handle: Vec2, portion: number): Vec2 => {
     const safe = Math.min(0.999, Math.max(0.001, portion));
     return {
@@ -497,21 +571,59 @@ export const removePoint = (
     };
   };
 
-  const geometry: SegmentGeometry = bothStraight
-    ? LINE
-    : {
-        kind: 'cubic',
-        control1:
-          incoming.geometry.kind === 'cubic'
-            ? rescale(from.position, incoming.geometry.control1, share)
-            : { x: from.position.x + (to.position.x - from.position.x) / 3,
-                y: from.position.y + (to.position.y - from.position.y) / 3 },
-        control2:
-          outgoing.geometry.kind === 'cubic'
-            ? rescale(to.position, outgoing.geometry.control2, 1 - share)
-            : { x: to.position.x - (to.position.x - from.position.x) / 3,
-                y: to.position.y - (to.position.y - from.position.y) / 3 },
+  const chordThird =
+    Math.hypot(to.position.x - from.position.x, to.position.y - from.position.y) / 3;
+
+  /**
+   * A handle for the approximate branch: `length` out from `anchor` along
+   * `tangent`, so the merge continues whatever the original edge was
+   * actually doing at this end — a line's own direction, or an arc's exact
+   * tangent — rather than assuming it was the straight chord between the two
+   * surviving points, which is what treating every non-cubic edge as a line
+   * used to do. Falls back to the chord itself only when `tangent` is
+   * degenerate (coincident points), the one case with no direction to keep.
+   */
+  const tangentHandle = (anchor: Vec2, tangent: Vec2, towards: Vec2, length: number): Vec2 => {
+    const magnitude = Math.hypot(tangent.x, tangent.y);
+    if (magnitude < 1e-9) {
+      return {
+        x: anchor.x + (towards.x - anchor.x) / 3,
+        y: anchor.y + (towards.y - anchor.y) / 3,
       };
+    }
+    return {
+      x: anchor.x + (tangent.x / magnitude) * length,
+      y: anchor.y + (tangent.y / magnitude) * length,
+    };
+  };
+
+  const geometry: SegmentGeometry = bothLines
+    ? LINE
+    : arcMerge
+      ? arcMerge
+      : {
+          kind: 'cubic',
+          control1:
+            incoming.geometry.kind === 'cubic'
+              ? rescale(from.position, incoming.geometry.control1, share)
+              : tangentHandle(
+                  from.position,
+                  tangentOnSegment(from.position, joint.position, incoming.geometry, 0),
+                  to.position,
+                  chordThird,
+                ),
+          control2:
+            outgoing.geometry.kind === 'cubic'
+              ? rescale(to.position, outgoing.geometry.control2, 1 - share)
+              : tangentHandle(
+                  to.position,
+                  ((v: Vec2): Vec2 => ({ x: -v.x, y: -v.y }))(
+                    tangentOnSegment(joint.position, to.position, outgoing.geometry, 1),
+                  ),
+                  from.position,
+                  chordThird,
+                ),
+        };
 
   const mergedId = createId(`${piece.id}-s`);
   const merged: PieceSegment = {
@@ -524,15 +636,14 @@ export const removePoint = (
     ...(incoming.seamFinish !== undefined ? { seamFinish: incoming.seamFinish } : {}),
   };
 
-  // Notches move on *arc-length* share, not the handle ratio above: a notch is
-  // positioned by how far along the seam it sits, so the proportion that
-  // matters is how much of the seam's length each original edge contributed.
+  // The same `share` the geometry above was built from — see the docstring
+  // for why arc-length share is exact here too, and not just the fallback.
   const notches: Notch[] = piece.notches.map((notch) => {
     if (notch.segmentId === incoming.id) {
-      return { ...notch, segmentId: mergedId, t: notch.t * arcShare };
+      return { ...notch, segmentId: mergedId, t: notch.t * share };
     }
     if (notch.segmentId === outgoing.id) {
-      return { ...notch, segmentId: mergedId, t: arcShare + notch.t * (1 - arcShare) };
+      return { ...notch, segmentId: mergedId, t: share + notch.t * (1 - share) };
     }
     return notch;
   });

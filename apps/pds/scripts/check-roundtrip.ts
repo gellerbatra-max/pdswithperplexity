@@ -13,6 +13,7 @@ import {
   translatePiece,
   translatePoints,
 } from '../src/pattern/edit.ts';
+import { resolveArc, tangentOnSegment } from '../src/pattern/curve.ts';
 import {
   boundarySegments,
   lengthAlongSegment,
@@ -220,6 +221,237 @@ for (const edit of edits) {
       'notch ids survive split and merge',
       restored.piece.notches.map((n) => n.id).join() === original.notches.map((n) => n.id).join(),
       restored.piece.notches.map((n) => n.id).join(),
+    );
+    // Perimeter and point count are necessary but not sufficient — two
+    // different cubics can have the same length. The merge is only
+    // genuinely exact if the control points themselves come back bit for
+    // bit, and the notch riding that edge comes back at the *same*
+    // parameter, not just roughly the same place.
+    const restoredGeometry = restored.piece.segments.find((s) => s.id === restored.segmentId)?.geometry;
+    const originalGeometry = original.segments.find((s) => s.id === 's2')?.geometry;
+    check(
+      'insert then delete restores the control points exactly',
+      shape(restoredGeometry) === shape(originalGeometry),
+      `${JSON.stringify(restoredGeometry)} vs ${JSON.stringify(originalGeometry)}`,
+    );
+    const restoredNotch = restored.piece.notches.find((n) => n.id === 'n2');
+    const originalNotch = original.notches.find((n) => n.id === 'n2');
+    check(
+      'insert then delete restores the notch parameter exactly',
+      restoredNotch !== undefined &&
+        originalNotch !== undefined &&
+        Math.abs(restoredNotch.t - originalNotch.t) < 1e-9,
+      `${restoredNotch?.t} vs ${originalNotch?.t}`,
+    );
+  }
+}
+
+/*
+ * The same round trip, but for an `arc` segment: split it, then delete the
+ * point the split added. Two arcs of one circle are one arc of that circle,
+ * so this must come back exactly too — merging two arcs used to fall back to
+ * a straight `LINE`, silently discarding the curvature entirely rather than
+ * approximating it.
+ */
+{
+  const arcPiece: PatternPiece = {
+    id: 'arcp1',
+    name: 'ArcFixture',
+    points: [
+      { id: 'a', position: { x: 0, y: 0 }, role: 'corner' },
+      { id: 'c', position: { x: 200, y: 0 }, role: 'corner' },
+      { id: 'd', position: { x: 100, y: -150 }, role: 'corner' },
+    ],
+    segments: [
+      { id: 's1', from: 'a', to: 'c', geometry: { kind: 'arc', radius: 130, largeArc: false, clockwise: false } },
+      { id: 's2', from: 'c', to: 'd', geometry: { kind: 'line' } },
+      { id: 's3', from: 'd', to: 'a', geometry: { kind: 'line' } },
+    ],
+    boundary: ['s1', 's2', 's3'],
+    closed: true,
+    seamAllowance: 10,
+    notches: [{ id: 'n1', segmentId: 's1', t: 0.7, kind: 'slit', depth: 6, width: 2, angle: 0 }],
+    internalLines: [],
+    meta: { code: 'ARC', category: 'shell', fabric: 'F', quantity: 1, onFold: false, mirrored: false },
+  };
+
+  const originalArcGeometry = arcPiece.segments.find((s) => s.id === 's1')!.geometry;
+  const inserted = insertPointOnSegment(arcPiece, 's1', 0.4);
+  check('splitting an arc keeps arc geometry on both halves', inserted !== null, inserted ? 'ok' : 'refused');
+
+  if (inserted) {
+    const cut = inserted.piece.points.find((p) => p.id === inserted.pointId);
+    check(
+      'the point cutting an arc is a curve point, not a corner',
+      cut?.role === 'curve',
+      cut?.role ?? 'missing',
+    );
+
+    const restored = removePoint(inserted.piece, inserted.pointId);
+    check('deleting it merges the arc back', restored !== null, restored ? 'ok' : 'refused');
+
+    if (restored) {
+      const mergedGeometry = restored.piece.segments.find((s) => s.id === restored.segmentId)?.geometry;
+      check(
+        'arc split then merge restores the exact same arc',
+        shape(mergedGeometry) === shape(originalArcGeometry),
+        `${JSON.stringify(mergedGeometry)} vs ${JSON.stringify(originalArcGeometry)}`,
+      );
+      const restoredNotch = restored.piece.notches.find((n) => n.id === 'n1');
+      check(
+        'arc split then merge restores the notch parameter exactly',
+        restoredNotch !== undefined && Math.abs(restoredNotch.t - 0.7) < 1e-9,
+        `${restoredNotch?.t} vs 0.7`,
+      );
+    }
+  }
+}
+
+/*
+ * Two arcs that do *not* share a circle cannot merge into one arc exactly —
+ * there is no single circle through both. The merge must not paper over that
+ * by silently dropping to a straight line (what it used to do for *any* pair
+ * of non-cubic edges); it has to produce a curve that is at least tangent-
+ * continuous with what was actually there.
+ */
+{
+  const piece: PatternPiece = {
+    id: 'arcp2',
+    name: 'TwoDifferentArcs',
+    points: [
+      { id: 'a', position: { x: 0, y: 0 }, role: 'corner' },
+      { id: 'b', position: { x: 100, y: 20 }, role: 'corner' },
+      { id: 'c', position: { x: 200, y: 0 }, role: 'corner' },
+      { id: 'd', position: { x: 100, y: -100 }, role: 'corner' },
+    ],
+    segments: [
+      { id: 's1', from: 'a', to: 'b', geometry: { kind: 'arc', radius: 80, largeArc: false, clockwise: false } },
+      { id: 's2', from: 'b', to: 'c', geometry: { kind: 'arc', radius: 80, largeArc: false, clockwise: false } },
+      { id: 's3', from: 'c', to: 'd', geometry: { kind: 'line' } },
+      { id: 's4', from: 'd', to: 'a', geometry: { kind: 'line' } },
+    ],
+    boundary: ['s1', 's2', 's3', 's4'],
+    closed: true,
+    seamAllowance: 10,
+    notches: [],
+    internalLines: [],
+    meta: { code: 'X', category: 'shell', fabric: 'F', quantity: 1, onFold: false, mirrored: false },
+  };
+
+  const s1 = piece.segments.find((s) => s.id === 's1')!;
+  const s2 = piece.segments.find((s) => s.id === 's2')!;
+  const first = resolveArc(piece.points.find((p) => p.id === 'a')!.position, piece.points.find((p) => p.id === 'b')!.position, s1.geometry);
+  const second = resolveArc(piece.points.find((p) => p.id === 'b')!.position, piece.points.find((p) => p.id === 'c')!.position, s2.geometry);
+  check(
+    'fixture is a genuine trap: the two arcs really are on different circles',
+    first !== null &&
+      second !== null &&
+      Math.hypot(first.centre.x - second.centre.x, first.centre.y - second.centre.y) > 1,
+    'ok',
+  );
+
+  const merged = removePoint(piece, 'b');
+  const mergedGeometry = merged?.piece.segments.find((s) => s.id === merged.segmentId)?.geometry;
+  check(
+    'non-cocircular arcs approximate as a curve, never silently as a line',
+    mergedGeometry?.kind === 'cubic',
+    mergedGeometry?.kind ?? 'refused',
+  );
+
+  if (mergedGeometry?.kind === 'cubic') {
+    // The approximation still has to be continuous: the merged cubic's
+    // initial tangent must match the *incoming arc's own* tangent at `a`,
+    // not the chord from `a` straight across to `c`.
+    const a = piece.points.find((p) => p.id === 'a')!.position;
+    const b = piece.points.find((p) => p.id === 'b')!.position;
+    const trueTangent = tangentOnSegment(a, b, s1.geometry, 0);
+    const trueAngle = Math.atan2(trueTangent.y, trueTangent.x);
+    const handleAngle = Math.atan2(mergedGeometry.control1.y - a.y, mergedGeometry.control1.x - a.x);
+    let diff = Math.abs(trueAngle - handleAngle);
+    if (diff > Math.PI) diff = 2 * Math.PI - diff;
+    check(
+      'the approximate merge keeps the true arc tangent, not the chord',
+      diff < 1e-9,
+      `${diff.toExponential(2)} rad off the arc's real tangent`,
+    );
+  }
+}
+
+/*
+ * Two cubics that only happen to meet — not collinear through the joint —
+ * must not be treated as an undone split, even though the *distance* ratio
+ * between the joint and the two inner handles falls inside (0, 1) here just
+ * as it would for a real split. Collinearity, not a ratio computable from
+ * any three points, is what tells the two cases apart.
+ */
+{
+  const piece: PatternPiece = {
+    id: 'cubp1',
+    name: 'IndependentCubics',
+    points: [
+      { id: 'a', position: { x: 0, y: 0 }, role: 'corner' },
+      { id: 'b', position: { x: 100, y: 50 }, role: 'curve' },
+      { id: 'c', position: { x: 200, y: 0 }, role: 'corner' },
+      { id: 'd', position: { x: 100, y: -150 }, role: 'corner' },
+    ],
+    segments: [
+      {
+        id: 's1',
+        from: 'a',
+        to: 'b',
+        geometry: { kind: 'cubic', control1: { x: 20, y: -30 }, control2: { x: 60, y: 200 } },
+      },
+      {
+        id: 's2',
+        from: 'b',
+        to: 'c',
+        geometry: { kind: 'cubic', control1: { x: 105, y: -80 }, control2: { x: 180, y: -20 } },
+      },
+      { id: 's3', from: 'c', to: 'd', geometry: { kind: 'line' } },
+      { id: 's4', from: 'd', to: 'a', geometry: { kind: 'line' } },
+    ],
+    boundary: ['s1', 's2', 's3', 's4'],
+    closed: true,
+    seamAllowance: 10,
+    notches: [],
+    internalLines: [],
+    meta: { code: 'X', category: 'shell', fabric: 'F', quantity: 1, onFold: false, mirrored: false },
+  };
+
+  const s1 = piece.segments.find((s) => s.id === 's1')!;
+  const s2 = piece.segments.find((s) => s.id === 's2')!;
+  if (s1.geometry.kind === 'cubic' && s2.geometry.kind === 'cubic') {
+    const d = s1.geometry.control2;
+    const e = s2.geometry.control1;
+    const joint = piece.points.find((p) => p.id === 'b')!.position;
+    const span = Math.hypot(e.x - d.x, e.y - d.y);
+    const distanceOnlyRatio = Math.hypot(joint.x - d.x, joint.y - d.y) / span;
+    check(
+      'fixture is a genuine trap: the distance-only ratio looks like a valid split parameter',
+      distanceOnlyRatio > 0 && distanceOnlyRatio < 1,
+      distanceOnlyRatio.toFixed(4),
+    );
+
+    const merged = removePoint(piece, 'b');
+    const mergedGeometry = merged?.piece.segments.find((s) => s.id === merged.segmentId)?.geometry;
+
+    const incomingLength = segmentLength(piece, s1);
+    const outgoingLength = segmentLength(piece, s2);
+    const expectedShare = incomingLength / (incomingLength + outgoingLength);
+    const from = piece.points.find((p) => p.id === 'a')!.position;
+    const expectedControl1 = {
+      x: from.x + (s1.geometry.control1.x - from.x) / expectedShare,
+      y: from.y + (s1.geometry.control1.y - from.y) / expectedShare,
+    };
+
+    check(
+      'non-collinear cubics fall back to arc-length share, not the trap ratio',
+      mergedGeometry?.kind === 'cubic' &&
+        Math.abs(mergedGeometry.control1.x - expectedControl1.x) < 1e-6 &&
+        Math.abs(mergedGeometry.control1.y - expectedControl1.y) < 1e-6,
+      mergedGeometry?.kind === 'cubic'
+        ? `${JSON.stringify(mergedGeometry.control1)} vs expected ${JSON.stringify(expectedControl1)}`
+        : (mergedGeometry?.kind ?? 'refused'),
     );
   }
 }

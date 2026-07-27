@@ -9,6 +9,7 @@ import {
   pointPositions,
   seamAllowanceRing,
   segmentEndpoints,
+  tangentOnSegment,
   type PatternPiece,
   type PieceId,
   type PointId,
@@ -236,12 +237,15 @@ const drawNotches = (
     const ends = segmentEndpoints(piece, segment);
     if (!at || !ends) continue;
 
-    // Inward normal, approximated from the segment chord.
-    const dx = ends[1].x - ends[0].x;
-    const dy = ends[1].y - ends[0].y;
-    const length = Math.hypot(dx, dy) || 1;
-    const nx = -dy / length;
-    const ny = dx / length;
+    // Inward normal, perpendicular to the *tangent at the notch's own
+    // position* rather than the segment's chord. On a curved or arced edge
+    // those point in visibly different directions away from the segment's
+    // midpoint, and a notch near either end of a strongly curved seam would
+    // be drawn leaning the wrong way if the chord stood in for the tangent.
+    const tangent = tangentOnSegment(ends[0], ends[1], segment.geometry, notch.t);
+    const length = Math.hypot(tangent.x, tangent.y) || 1;
+    const nx = -tangent.y / length;
+    const ny = tangent.x / length;
 
     const base = worldToScreen(camera, at);
     const tip = worldToScreen(camera, {
