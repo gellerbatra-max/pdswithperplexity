@@ -18,7 +18,7 @@ modify it. Study its patterns and follow them.
 
 | Module | Location | Reuse strategy |
 |---|---|---|
-| Geometry | `apps/pds/src/geometry/` | Import types (`Vec2`, `Bounds`) directly via relative path until packages/ are extracted |
+| Geometry | `apps/pds/src/geometry/` | **Do NOT import directly by relative path** — composite tsconfig blocks cross-project imports. Extract to `packages/geometry` at Step 4 instead. |
 | Canvas core | `apps/pds/src/canvas/` | Study the camera/grid pattern; write a fresh marker canvas following the same shape |
 | Design tokens | `apps/pds/src/styles/` | Import the tokens CSS file directly |
 | Zustand stores | `apps/pds/src/store/` | Follow the same store shape — one concern per file |
@@ -36,7 +36,7 @@ modify it. Study its patterns and follow them.
 | vite | 7.3.6 | 7.1.0 has high-severity CVEs (path traversal, server.fs.deny bypass); 7.3.6 is the fixed resolved version |
 | typescript | 5.9.3 | 5.9.0 was never published stable; 5.9.3 is the first stable 5.9.x |
 | @vitejs/plugin-react | 5.0.0 | per spec |
-| vitest | 3.2.7 | devDependency, add in Step 1. Below 3.2.6 is GHSA-5xrq-8626-4rwp (critical), which fails the Step 1 audit gate |
+| vitest | 3.2.7 | 3.2.4 fails the audit gate (GHSA-5xrq-8626-4rwp critical CVE); use 3.2.7 |
 
 All packages in the `dependencies` block must be pinned exact — no `^` or `~`.
 `devDependencies` may use `~` for patch-level flexibility only.
@@ -47,6 +47,52 @@ All packages in the `dependencies` block must be pinned exact — no `^` or `~`.
    renders whatever the store holds.
 2. **Nothing calls a model or file format directly.** `io/` and
    `ai/` are interfaces with swappable adapters behind them.
+
+---
+
+## Locked Decisions (do not re-litigate these)
+
+These were ambiguous in the original spec and were resolved during
+Step 2. They are now the canonical implementation.
+
+### consumption() units
+The formula `(markerLength + endAllowance) / garmentCount` is in cm.
+Divide by 100 to convert to **m/garment** before returning.
+The ribbon always displays metres — factory users read meters, not centimetres.
+
+### PlacedPiece transform order
+The canonical order is: **flip first, then rotate CCW**.
+Steps 4–5 (canvas rendering) and all tools must use this same order
+or pieces will render somewhere other than where collision detects them.
+Document this as a comment wherever transforms are applied.
+
+### markerStatus() empty-document behaviour
+Check UNMADE first: if `pieces.length === 0` → return `'UNMADE'`.
+An empty marker is UNMADE, not vacuously MADE.
+Order of checks: UNMADE → MADE → PARTIAL.
+
+### garmentCount() definition
+A bundle is **complete** when every `TrayPiece` in that bundle has
+`placed >= quantity`. `garmentCount` returns the count of complete bundles.
+Do NOT use `min(floor(placed/quantity))` across pieces — that gives
+fractional garments when bundles are partially cut, which is wrong.
+
+### PDS geometry reuse strategy
+`composite: true` in `tsconfig.app.json` blocks cross-project relative
+imports — attempting to import from `apps/pds/src/geometry/` will throw
+TS6307. The correct strategy:
+- **Steps 1–3**: marker is fully self-contained (defines its own `Point` type).
+- **Step 4**: extract shared types to `packages/geometry` as a proper
+  monorepo package, then import from there in both PDS and marker.
+- **Never** add a TS project reference to PDS or widen marker's `include`
+  to reach into PDS source files.
+
+### Step 4 canvas clarifications
+- Konva 9.3.18 deprecates `FastLayer`. Use `new Konva.Layer({ listening: false })`
+  for non-interactive layers (`FabricLayer`, `OverlayLayer`, `UILayer`) so the
+  console stays clean while keeping the same intent.
+- The prose in the original coordinate description was backwards. Canonical axes:
+  **length runs along +X, width runs across +Y**. Keep `fabricWidth` on the Y axis.
 
 ---
 
@@ -91,7 +137,7 @@ apps/marker/
     ├── canvas/
     │   ├── MarkerCanvas.ts      ← Konva stage manager (imperative, no React)
     │   ├── layers/
-    │   │   ├── FabricLayer.ts   ← Static bg (Konva.FastLayer)
+    │   │   ├── FabricLayer.ts   ← Static bg (Konva.Layer with listening: false)
     │   │   ├── PieceLayer.ts    ← Interactive pieces (Konva.Layer)
     │   │   ├── OverlayLayer.ts  ← Defect zones, splice lines, violations
     │   │   └── UILayer.ts       ← Rulers, labels, cursor readout
@@ -131,7 +177,7 @@ File: `apps/marker/src/marker/schema.ts`
 
 **All coordinates are in CENTIMETRES.**
 Origin 0,0 = bottom-left corner of fabric.
-Width runs across (+Y), length runs along (+X).
+Length runs along (+X), width runs across (+Y).
 
 ```typescript
 export interface MarkerDocument {
@@ -166,6 +212,8 @@ export interface PlacedPiece {
   position: Point               // translation applied to geometry
   rotation: number              // degrees, positive = CCW
   flipped: boolean              // horizontal flip
+  // Transform order: flip FIRST, then rotate CCW. All canvas code must
+  // use this same order or collision and rendering will diverge.
   placed: true
   cutSequence?: number
   bufferOverride?: number
@@ -242,15 +290,18 @@ utilization(doc): number
   → (placedPieceArea / markerArea) × 100  — as a percentage
 
 consumption(doc): number
-  → (markerLength + endAllowance) / garmentCount  — in m/garment
+  → ((markerLength + endAllowance) / garmentCount) / 100  — in m/garment
+  NOTE: divide by 100 to convert cm → m. Ribbon displays metres.
 
 garmentCount(doc): number
-  → count of complete bundles where all TrayPiece quantities are placed
+  → count of complete bundles where every TrayPiece in the bundle
+    has placed >= quantity. A bundle key = TrayPiece.bundle value.
+    Returns 0 if no bundles are complete.
 
 markerStatus(doc): 'MADE' | 'PARTIAL' | 'UNMADE'
-  → MADE if all order pieces are placed
-  → UNMADE if zero pieces placed
-  → PARTIAL otherwise
+  → Check order: UNMADE first (pieces.length === 0 → UNMADE),
+    then MADE (all order pieces placed), then PARTIAL.
+    Empty document is always UNMADE, never vacuously MADE.
 ```
 
 Every function in this file must have a Vitest unit test.
@@ -266,17 +317,13 @@ pieces; direct Konva sustains 31+ FPS.
 
 ### Layer stack (bottom to top):
 
-Konva 9.3 deprecates `FastLayer`; the non-interactive layers use
-`new Konva.Layer({ listening: false })`, which is the same
-optimisation without the console warning.
-
-1. `FabricLayer` (`Layer`, listening off) — fabric rect, width guide
+1. `FabricLayer` (`Konva.Layer({ listening: false })`) — fabric rect, width guide
    lines, ruler ticks. Redrawn only on fabricWidth/zoom change.
 2. `PieceLayer` (Konva.Layer) — one Konva.Group per placed piece
    containing polygon shape + label text. All drag events here.
-3. `OverlayLayer` (`Layer`, listening off) — defect zones (red rect),
+3. `OverlayLayer` (`Konva.Layer({ listening: false })`) — defect zones (red rect),
    splice lines (dashed vertical), violation outlines (red dash).
-4. `UILayer` (`Layer`, listening off) — cursor coordinates, selection
+4. `UILayer` (`Konva.Layer({ listening: false })`) — cursor coordinates, selection
    handles, marquee rectangle during drag-select.
 
 ### Performance rules — enforce always:
@@ -617,6 +664,8 @@ Examples:
 **Never leave a completed step uncommitted.**
 If a verify check fails, fix it first — do not commit broken state.
 Do NOT push unless I ask. Commit locally only.
+If working on a branch, that is fine. Fast-forward merge to `main`
+after the step is approved, then delete the branch.
 
 ---
 
@@ -625,7 +674,7 @@ Do NOT push unless I ask. Commit locally only.
 Execute these steps in strict sequence. Do not start a step
 until the previous one passes its verification check AND is committed.
 
-### Step 1 — Scaffold
+### Step 1 — Scaffold ✓ (complete)
 Create: `package.json`, `vite.config.ts`, `tsconfig.json`,
 `tsconfig.app.json`, `tsconfig.node.json`, `index.html`,
 `src/main.tsx`, `src/App.tsx` (empty div, no logic).
@@ -640,7 +689,7 @@ with no TypeScript errors.
 
 ---
 
-### Step 2 — Document Model
+### Step 2 — Document Model ✓ (complete)
 Create: `src/marker/schema.ts` with all types from the
 "Core Data Model" section above — fully typed, no stubs.
 Create: `src/marker/selectors.ts` with all pure functions
@@ -649,7 +698,9 @@ Create: `src/marker/migrations.ts` with a `migrate(raw: unknown)`
 function that returns a `MarkerDocument` at schemaVersion 2.
 
 ✓ Verify: `npm run typecheck --workspace=apps/marker` passes.
-✓ Verify: Vitest unit tests for all selectors pass.
+✓ Verify: Vitest unit tests for all selectors pass (37 tests).
+✓ Verify: `npm audit --workspace=apps/marker` reports 0 vulnerabilities.
+✓ Verify: No `any`, no type assertions (confirmed by grep).
 → Commit: `feat(marker): step 2 — document model, selectors, migrations, tests`
 
 ---
@@ -676,7 +727,15 @@ Create: `src/store/uiStore.ts`
 ---
 
 ### Step 4 — Canvas Foundation
-Create: `src/canvas/MarkerCanvas.ts`
+**Before writing canvas code**, extract shared geometry types to
+`packages/geometry` (a new monorepo package). This avoids the
+TS6307 cross-project import error. Steps:
+1. Create `packages/geometry/src/index.ts` exporting `Vec2`, `Bounds`, `Point`
+2. Add `packages/geometry` to the root `package.json` workspaces
+3. Add `"@nestiq/geometry": "*"` to both `apps/marker` and `apps/pds` dependencies
+4. Import geometry types from `@nestiq/geometry` in new canvas code
+
+Then create: `src/canvas/MarkerCanvas.ts`
 - Class that accepts a container `HTMLDivElement`
 - Creates a `Konva.Stage` with 4 layers in correct order
 - Exposes `update(doc, viewport)` method called by React on store change
@@ -684,8 +743,8 @@ Create: `src/canvas/MarkerCanvas.ts`
 
 Create: `src/canvas/layers/FabricLayer.ts`
 - Renders fabric rectangle (light grey fill)
-- Renders dashed vertical line at `fabricWidth`
-- Renders horizontal ruler ticks every 10 cm
+- Renders dashed line at `fabricWidth` (top edge in marker space)
+- Renders ruler ticks every 10 cm
 
 ✓ Verify: A hardcoded 150cm × 500cm fabric renders on screen.
 ✓ Verify: Zoom in/out with `+`/`-` keys works. Pan with middle-mouse works.
@@ -699,6 +758,7 @@ Create: `src/canvas/layers/PieceLayer.ts`
 - Group contains: `Konva.Line` (polygon), `Konva.Text` (name + size)
 - Apply `piece.cache()` after first render
 - Viewport culling: skip groups outside camera bounds
+- Transform order: flip FIRST, then rotate CCW (see Locked Decisions)
 
 Create: `src/canvas/collision/aabb.ts`
 Create: `src/canvas/collision/sat.ts`
