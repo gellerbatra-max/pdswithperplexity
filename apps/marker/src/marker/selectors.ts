@@ -5,49 +5,8 @@
  * function here is unit-tested without a DOM.
  */
 
-import type { MarkerDocument, PlacedPiece, Point } from './schema';
-
-const DEG_TO_RAD = Math.PI / 180;
-
-/**
- * A piece's outline after flip and rotation, but before translation.
- *
- * Order matters: horizontal flip first, then counter-clockwise rotation. The
- * canvas and the collision narrow phase must apply the same order, or a piece
- * will render somewhere other than where it collides.
- */
-const orientedGeometry = (piece: PlacedPiece): Point[] => {
-  const radians = piece.rotation * DEG_TO_RAD;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
-  return piece.geometry.map((point) => {
-    const x = piece.flipped ? -point.x : point.x;
-    const y = point.y;
-    return { x: x * cos - y * sin, y: x * sin + y * cos };
-  });
-};
-
-interface Extent {
-  readonly width: number;
-  readonly height: number;
-}
-
-const EMPTY_EXTENT: Extent = { width: 0, height: 0 };
-
-const extentOf = (points: readonly Point[]): Extent => {
-  if (points.length === 0) return EMPTY_EXTENT;
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-  for (const point of points) {
-    minX = Math.min(minX, point.x);
-    minY = Math.min(minY, point.y);
-    maxX = Math.max(maxX, point.x);
-    maxY = Math.max(maxY, point.y);
-  }
-  return { width: maxX - minX, height: maxY - minY };
-};
+import { extentOf, orientedGeometry } from './pieceGeometry';
+import type { MarkerDocument, Point } from './schema';
 
 /** Enclosed area via the shoelace formula. Always positive. */
 const polygonArea = (points: readonly Point[]): number => {

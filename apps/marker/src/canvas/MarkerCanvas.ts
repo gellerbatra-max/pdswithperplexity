@@ -1,7 +1,9 @@
 import Konva from 'konva';
-import type { MarkerDocument } from '@/marker/schema';
+import type { MarkerDocument, Point } from '@/marker/schema';
 import { markerLength } from '@/marker/selectors';
 import { FabricLayer } from './layers/FabricLayer';
+import { PieceLayer } from './layers/PieceLayer';
+import { DragTool, type DragToolContext } from './tools/DragTool';
 import type { MarkerTransform, ViewportSnapshot } from './types';
 
 /**
@@ -22,21 +24,29 @@ export interface MarkerCanvasCallbacks {
   /** Pixel deltas from a middle-mouse drag; the store converts them to pan. */
   onPanBy: (dxPx: number, dyPx: number) => void;
   onStageResize: (width: number, height: number) => void;
+  /** A drag finished: the piece's resolved, collision-free position. */
+  onPieceMoved: (pieceId: string, position: Point) => void;
 }
 
 export class MarkerCanvas {
   private readonly stage: Konva.Stage;
   private readonly fabricLayer = new FabricLayer();
+  private readonly pieceLayer = new PieceLayer();
 
   // Layer order is the render order: fabric behind, UI in front. Only the
   // piece layer listens; Konva 9.3 deprecates FastLayer in favour of exactly
   // this, a Layer with hit detection switched off.
-  private readonly pieceLayer = new Konva.Layer();
   private readonly overlayLayer = new Konva.Layer({ listening: false });
   private readonly uiLayer = new Konva.Layer({ listening: false });
 
   private readonly resizeObserver: ResizeObserver;
   private readonly detachPointerHandlers: () => void;
+
+  /**
+   * The last state pushed in. DragTool reads it mid-gesture, when React has
+   * not re-rendered yet, so it must be whatever `update` saw most recently.
+   */
+  private context: DragToolContext | null = null;
 
   constructor(container: HTMLDivElement, callbacks: MarkerCanvasCallbacks) {
     this.stage = new Konva.Stage({
@@ -46,8 +56,7 @@ export class MarkerCanvas {
     });
 
     this.stage.add(this.fabricLayer.layer);
-    // TODO(step-5): PieceLayer renders placed pieces onto this layer.
-    this.stage.add(this.pieceLayer);
+    this.stage.add(this.pieceLayer.layer);
     // TODO(step-7): OverlayLayer draws defect zones, splice lines, violations.
     this.stage.add(this.overlayLayer);
     // TODO(step-6): UILayer draws rulers, selection handles, cursor readout.
@@ -64,18 +73,37 @@ export class MarkerCanvas {
     callbacks.onStageResize(container.clientWidth, container.clientHeight);
 
     this.detachPointerHandlers = attachMiddleMousePan(container, callbacks.onPanBy);
+
+    this.pieceLayer.setDragTool(
+      new DragTool({
+        getContext: () => this.context,
+        onCommit: callbacks.onPieceMoved,
+      }),
+    );
   }
 
   /** Called by React whenever the document or the camera changes. */
   update(document: MarkerDocument | null, viewport: ViewportSnapshot): void {
     if (!document) {
+      this.context = null;
       this.fabricLayer.clear();
       return;
     }
+
+    const transform = createTransform(document.fabricWidth, viewport);
+    this.context = { document, transform };
+
     this.fabricLayer.update({
       fabricWidth: document.fabricWidth,
       fabricLength: Math.max(markerLength(document), MIN_FABRIC_LENGTH),
-      transform: createTransform(document.fabricWidth, viewport),
+      transform,
+    });
+
+    this.pieceLayer.update({
+      document,
+      transform,
+      stageWidth: this.stage.width(),
+      stageHeight: this.stage.height(),
     });
   }
 
@@ -83,6 +111,7 @@ export class MarkerCanvas {
     this.resizeObserver.disconnect();
     this.detachPointerHandlers();
     this.fabricLayer.destroy();
+    this.pieceLayer.destroy();
     this.stage.destroy();
   }
 }
@@ -97,6 +126,8 @@ const createTransform = (fabricWidth: number, viewport: ViewportSnapshot): Marke
     scale: zoom,
     x: (cm) => cm * zoom + panX,
     y: (cm) => (fabricWidth - cm) * zoom + panY,
+    toMarkerX: (px) => (px - panX) / zoom,
+    toMarkerY: (px) => fabricWidth - (px - panY) / zoom,
   };
 };
 

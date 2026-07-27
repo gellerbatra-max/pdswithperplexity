@@ -24,6 +24,9 @@ export interface MarkerTransform {
   readonly scale: number;
   readonly x: (cm: number) => number;
   readonly y: (cm: number) => number;
+  /** Stage px back to marker cm — dragging reads positions off the stage. */
+  readonly toMarkerX: (px: number) => number;
+  readonly toMarkerY: (px: number) => number;
 }
 
 export interface FabricLayerInput {

@@ -32,6 +32,8 @@ export const App = () => {
         setPan(panX + dx, panY + dy);
       },
       onStageResize: (width, height) => useViewportStore.getState().setStageSize(width, height),
+      onPieceMoved: (pieceId, position) =>
+        useMarkerStore.getState().updatePiece(pieceId, { position }),
     });
 
     // Push state in rather than letting the canvas subscribe: the canvas stays
