@@ -1,0 +1,713 @@
+# NestIQ Marker — Claude Code Instructions
+
+This file is the single source of truth for this project.
+Read it fully before writing any code. Never deviate from
+the build order. Complete each step fully before moving to
+the next. When a step is done, say "Step [N] complete ✓"
+and wait for my confirmation before proceeding.
+
+---
+
+## Monorepo Context
+
+This app lives inside an existing monorepo at the repo root.
+The sibling app `apps/pds` is a Pattern Design Studio — do NOT
+modify it. Study its patterns and follow them.
+
+### What PDS already has (reuse these patterns, do not copy files):
+
+| Module | Location | Reuse strategy |
+|---|---|---|
+| Geometry | `apps/pds/src/geometry/` | Import types (`Vec2`, `Bounds`) directly via relative path until packages/ are extracted |
+| Canvas core | `apps/pds/src/canvas/` | Study the camera/grid pattern; write a fresh marker canvas following the same shape |
+| Design tokens | `apps/pds/src/styles/` | Import the tokens CSS file directly |
+| Zustand stores | `apps/pds/src/store/` | Follow the same store shape — one concern per file |
+| Command registry | `apps/pds/src/commands/` | Follow the same plain-TS pattern |
+
+### Existing stack (match exactly):
+
+- React 19.2.0
+- TypeScript ~5.9.0 (strict mode)
+- Vite 7.1.0
+- Zustand 5.0.8
+- `@vitejs/plugin-react` 5.0.0
+
+### Two hard rules from PDS that carry into ALL new code:
+
+1. **Features never draw.** They mutate the store; `canvas/`
+   renders whatever the store holds.
+2. **Nothing calls a model or file format directly.** `io/` and
+   `ai/` are interfaces with swappable adapters behind them.
+
+---
+
+## What We Are Building
+
+`apps/marker/` — a standalone Vite + React 19 + TypeScript app
+inside the same monorepo. It is a production marker-making tool
+for apparel factories, modelled on Gerber AccuMark Easy Marking
+but built as a modern local-first PWA.
+
+The marker app must:
+- Run entirely in the browser (no server required for core work)
+- Save all customer data locally (IndexedDB via Dexie.js)
+- Work fully offline via Service Worker
+- Be installable as a PWA (desktop icon, standalone window)
+- Export files Gerber AccuMark can open (AAMA DXF + RUL, HPGL)
+
+---
+
+## Target Folder Structure
+
+```
+apps/marker/
+├── index.html
+├── package.json
+├── vite.config.ts
+├── tsconfig.json
+├── tsconfig.app.json
+├── tsconfig.node.json
+├── CLAUDE.md                    ← this file
+└── src/
+    ├── main.tsx
+    ├── App.tsx
+    ├── marker/                  ← Document model (no React, no side effects)
+    │   ├── schema.ts            ← All TypeScript types
+    │   ├── selectors.ts         ← Pure read helpers (utilization, etc.)
+    │   └── migrations.ts        ← Schema versioning
+    ├── store/
+    │   ├── markerStore.ts       ← Document state
+    │   ├── viewportStore.ts     ← Camera: zoom, panX, panY, scale
+    │   └── uiStore.ts           ← Active tool, selection, dock visibility
+    ├── canvas/
+    │   ├── MarkerCanvas.ts      ← Konva stage manager (imperative, no React)
+    │   ├── layers/
+    │   │   ├── FabricLayer.ts   ← Static bg (Konva.FastLayer)
+    │   │   ├── PieceLayer.ts    ← Interactive pieces (Konva.Layer)
+    │   │   ├── OverlayLayer.ts  ← Defect zones, splice lines, violations
+    │   │   └── UILayer.ts       ← Rulers, labels, cursor readout
+    │   ├── tools/
+    │   │   ├── DragTool.ts      ← Drag with collision bounce-back
+    │   │   ├── SelectTool.ts    ← Click + marquee selection
+    │   │   └── ButtSlideTool.ts ← Binary-search slide to collision
+    │   └── collision/
+    │       ├── aabb.ts          ← Broad phase (fast rectangle overlap)
+    │       └── sat.ts           ← Narrow phase (SAT polygon + MTV)
+    ├── features/
+    │   ├── placement/           ← Interactive placement workspace
+    │   ├── cutplan/             ← Cut Plan: demand → spreads
+    │   └── cutsequence/         ← Cut sequencing + knife path
+    ├── commands/                ← Marker command registry (plain TS, no React)
+    ├── nest/
+    │   ├── heuristic.ts         ← Bottom-Left Fill (runs in Web Worker)
+    │   └── aiClient.ts          ← Stub for Phase 5 AI nesting API
+    ├── io/
+    │   ├── dxfImporter.ts       ← AAMA DXF + RUL parser
+    │   ├── dxfExporter.ts       ← AAMA ZIP export
+    │   ├── hpglExporter.ts      ← HPGL .plt cut data
+    │   ├── markerJson.ts        ← Native .marker.json save/open
+    │   └── workers/
+    │       └── dxfWorker.ts     ← Web Worker for DXF parsing
+    ├── db/
+    │   └── database.ts          ← Dexie.js IndexedDB setup
+    └── styles/
+        └── marker.css           ← Imports PDS tokens + marker overrides
+```
+
+---
+
+## Core Data Model
+
+File: `apps/marker/src/marker/schema.ts`
+
+**All coordinates are in CENTIMETRES.**
+Origin 0,0 = bottom-left corner of fabric.
+Width runs right (+X), length runs up (+Y).
+
+```typescript
+export interface MarkerDocument {
+  id: string
+  schemaVersion: 2
+  name: string
+  fabricWidth: number           // cm
+  endAllowance: number          // cm, default 4
+  rotationRule: 'strict' | '90ok' | 'free'
+  cutterBuffer: 0 | 0.3 | 0.5 | 1  // cm
+  pieces: PlacedPiece[]
+  trayPieces: TrayPiece[]
+  defectZones: DefectZone[]
+  spliceLines: SpliceLine[]
+  order: MarkerOrder
+  approvalState: 'draft' | 'needs_approval' | 'approved'
+  comparison?: ComparisonLayer
+  createdAt: string             // ISO 8601
+  updatedAt: string
+}
+
+export interface Point { x: number; y: number }
+
+export interface PlacedPiece {
+  id: string
+  pieceDefId: string            // references TrayPiece.id
+  name: string
+  size: string
+  bundle: string
+  fabricCode: string            // max 4 chars, default 'A'
+  geometry: Point[]             // polygon boundary in marker space (cm)
+  position: Point               // translation applied to geometry
+  rotation: number              // degrees, positive = CCW
+  flipped: boolean              // horizontal flip
+  placed: true
+  cutSequence?: number
+  bufferOverride?: number
+  blocked: boolean              // whole bbox treated as solid obstacle
+}
+
+export interface TrayPiece {
+  id: string
+  name: string
+  size: string
+  bundle: string
+  fabricCode: string
+  geometry: Point[]             // polygon at origin, unplaced
+  layDirection: '2way' | '4way' | 'free'
+  quantity: number
+  placed: number                // how many are currently on the marker
+}
+
+export interface MarkerOrder {
+  model: string
+  sizes: SizeEntry[]
+}
+
+export interface SizeEntry {
+  size: string
+  quantity: number
+  fabricCode: string
+}
+
+export interface DefectZone {
+  id: string
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface SpliceLine {
+  id: string
+  x: number                     // position along marker length (cm)
+}
+
+export interface ComparisonLayer {
+  markerName: string
+  pieces: PlacedPiece[]
+  opacity: number               // 0–1
+  offsetX: number
+  offsetY: number
+  visible: boolean
+}
+```
+
+---
+
+## Key Computed Selectors
+
+File: `apps/marker/src/marker/selectors.ts`
+
+All pure functions — zero React imports, zero side effects,
+zero Zustand access. Inputs are always a `MarkerDocument`.
+
+```
+markerLength(doc): number
+  → max (piece.position.x + piece bounding box width) across
+    all placed pieces, in cm
+
+markerArea(doc): number
+  → fabricWidth × markerLength
+
+placedPieceArea(doc): number
+  → sum of polygon areas via shoelace formula for all placed pieces
+
+utilization(doc): number
+  → (placedPieceArea / markerArea) × 100  — as a percentage
+
+consumption(doc): number
+  → (markerLength + endAllowance) / garmentCount  — in m/garment
+
+garmentCount(doc): number
+  → count of complete bundles where all TrayPiece quantities are placed
+
+markerStatus(doc): 'MADE' | 'PARTIAL' | 'UNMADE'
+  → MADE if all order pieces are placed
+  → UNMADE if zero pieces placed
+  → PARTIAL otherwise
+```
+
+Every function in this file must have a Vitest unit test.
+
+---
+
+## Canvas Architecture
+
+**Use Konva.js DIRECTLY — not react-konva.**
+React manages the UI shell. Konva manages the canvas imperatively.
+This is non-negotiable: react-konva drops to ~9 FPS with 200+
+pieces; direct Konva sustains 31+ FPS.
+
+### Layer stack (bottom to top):
+
+1. `FabricLayer` (Konva.FastLayer) — fabric rect, width guide
+   lines, ruler ticks. Redrawn only on fabricWidth/zoom change.
+2. `PieceLayer` (Konva.Layer) — one Konva.Group per placed piece
+   containing polygon shape + label text. All drag events here.
+3. `OverlayLayer` (Konva.FastLayer) — defect zones (red rect),
+   splice lines (dashed vertical), violation outlines (red dash).
+4. `UILayer` (Konva.FastLayer) — cursor coordinates, selection
+   handles, marquee rectangle during drag-select.
+
+### Performance rules — enforce always:
+
+- **Viewport culling**: skip rendering pieces whose bounding box
+  falls entirely outside the current camera view
+- `piece.cache()` after placement; `piece.clearCache()` before drag
+- `shadowForStrokeEnabled: false` on ALL shapes without exception
+- `transformsEnabled: 'position'` on pieces that never rotate
+- `stage.batchDraw()` after bulk operations (auto-nest, undo/redo)
+- Never call `stage.draw()` inside a `requestAnimationFrame` loop —
+  Konva's own animation system handles this
+
+### Coordinate system bridge:
+
+Marker space: origin 0,0 = bottom-left, Y increases upward (cm).
+Konva space: origin 0,0 = top-left, Y increases downward (px).
+
+`MarkerCanvas.ts` owns the transform — nowhere else:
+```
+konvaX = piece.position.x * scale + panX
+konvaY = (fabricWidth - piece.position.y) * scale + panY
+```
+
+Features and tools always work in marker space (cm).
+The renderer converts to Konva space. Never mix units.
+
+---
+
+## Collision Detection
+
+File: `apps/marker/src/canvas/collision/`
+
+Two-phase system, both operating in marker coordinates (cm):
+
+### Phase 1 — AABB broad phase (`aabb.ts`):
+
+Fast axis-aligned rectangle overlap. Expand each AABB by
+`piece.bufferOverride ?? doc.cutterBuffer` on all sides.
+If AABBs don't overlap → skip. Cost: O(n) per drag event.
+
+### Phase 2 — SAT narrow phase (`sat.ts`):
+
+Separating Axis Theorem on the actual polygon pairs.
+Only runs when AABB reports overlap. Returns:
+```typescript
+interface CollisionResult {
+  collides: boolean
+  mtv?: { x: number; y: number }  // Minimum Translation Vector
+}
+```
+
+During drag: apply the inverse MTV to snap the dragged piece to
+just outside the collision boundary. Snap must feel instant —
+no animation, no easing.
+
+Check against: all other placed pieces + defect zones + fabric
+boundary (x < 0, x > markerLength, y < 0, y > fabricWidth) +
+splice lines (treated as full-height vertical walls).
+
+---
+
+## Heuristic Auto-Nest
+
+File: `apps/marker/src/nest/heuristic.ts`
+
+Runs inside a **Web Worker** — never on the main thread.
+The UI posts a message and receives progress + result.
+
+### Worker message protocol:
+```
+Main → Worker: { type: 'NEST', input: NestInput }
+Worker → Main: { type: 'PROGRESS', percent: number }
+Worker → Main: { type: 'RESULT', result: NestResult }
+Worker → Main: { type: 'ERROR', message: string }
+```
+
+### Types:
+```typescript
+interface NestInput {
+  pieces: TrayPiece[]
+  fabricWidth: number
+  placed: PlacedPiece[]     // existing pieces = obstacles
+  defectZones: DefectZone[]
+  spliceLines: SpliceLine[]
+  effort: 1 | 2 | 3 | 4 | 5
+}
+
+interface NestResult {
+  placements: Array<{
+    pieceDefId: string
+    position: Point
+    rotation: number
+    flipped: boolean
+  }>
+  utilization: number
+  markerLength: number
+}
+```
+
+### Algorithm — Bottom-Left Fill:
+
+1. Sort pieces: largest bounding-box area first
+2. For each piece, collect allowed rotations from `layDirection`:
+   - `'2way'`: [0, 180]
+   - `'4way'`: [0, 90, 180, 270]
+   - `'free'`: [0, 45, 90, 135, 180, 225, 270, 315] × effort
+3. Scan placement grid at step `= 1.0 / effort` cm, left-to-right
+   then bottom-to-top, trying each rotation
+4. First valid position (passes AABB + SAT vs all obstacles) = placed
+5. Add placed piece to obstacle list and continue
+
+---
+
+## UI Layout
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  TOP BAR  52px                                          │
+│  logo · workspace tabs · ⌘K · save indicator · undo    │
+├──────┬──────────────────────────────────┬───────────────┤
+│TRAY  │                                  │  RIGHT DOCK   │
+│220px │         CANVAS                   │    282px      │
+│      │  (Konva stage, full flex)        │               │
+│pieces│                                  │  tabs:        │
+│grouped                                  │  Piece        │
+│by    │                                  │  Order        │
+│size ×│                                  │  Options      │
+│fabric│                                  │  Keys         │
+├──────┴──────────────────────────────────┴───────────────┤
+│  BOTTOM RIBBON  48px                                    │
+│  fabric name · order chip · width field · length ·     │
+│  utilization · consumption · status chip (MADE etc.)   │
+├─────────────────────────────────────────────────────────┤
+│  STATUS BAR  30px                                       │
+│  colour-coded messages: info/ok/warn/error              │
+│  warn + error persist until replaced — never auto-dim  │
+└─────────────────────────────────────────────────────────┘
+```
+
+Tray: pieces grouped by name × size × fabric code. Each row shows
+quantity badge (placed / total). Click to place at origin; drag
+directly from tray to canvas position.
+
+Right Dock:
+- **Piece tab**: selected piece properties — name, size, bundle,
+  fabric code, position (editable), rotation, flip state
+- **Order tab**: order model, size/qty table, MADE/PARTIAL chip
+- **Options tab**: fabric width, end allowance, cutter buffer,
+  rotation rule, ply direction
+- **Keys tab**: keyboard shortcut reference
+
+---
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|---|---|
+| `R` / `Shift+R` | Rotate CW / CCW (respects lay direction) |
+| `F` / `Shift+F` | Flip horizontal / vertical |
+| `Arrow keys` | Nudge selected piece 1 cm |
+| `Shift+Arrow` | Nudge selected piece 1 mm |
+| `L` | Butt-slide left until collision |
+| `U` | Butt-slide up until collision |
+| `Delete` | Return selected piece to tray |
+| `Shift+click` | Add/remove from selection |
+| `Alt+click` | Select entire bundle |
+| `Esc` | Cancel drag / deselect all |
+| `Ctrl+Z` / `Ctrl+Y` | Undo / Redo |
+| `+` / `-` / `0` | Zoom in / out / fit marker to view |
+| `N` | New marker dialog |
+| `Ctrl+K` / `⌘K` | Command palette |
+| `?` | Toggle Keys panel |
+
+---
+
+## DXF Import
+
+File: `apps/marker/src/io/dxfImporter.ts`
+Worker: `apps/marker/src/io/workers/dxfWorker.ts`
+
+The importer MUST run inside a Web Worker — never on the main
+thread. Large factory DXF files exceed 50 MB.
+
+### Required capabilities:
+
+1. AAMA/ASTM DXF + `.rul` grade-rule table parsing
+2. `BLOCK`+`INSERT` recursive resolution (translate, rotate, mirror)
+3. Chain-stitch: open `LINE`/`LWPOLYLINE` segments → closed loops
+4. Duplicate layer deduplication (full geometry comparison)
+5. Bulge arc tessellation (DXF bulge value → arc points)
+6. Unit heuristic: if largest contour dimension < 25 → inches,
+   else cm. Convert everything to cm on output.
+7. `ATTRIB` metadata extraction: piece name, size, bundle code
+8. Error resilience: missing block / circular reference →
+   skip that piece + add to warnings array, continue parsing
+
+### Worker message protocol:
+```
+Main → Worker:  { type: 'PARSE_DXF', dxfText: string, rulText?: string }
+Worker → Main:  { type: 'PROGRESS', percent: number }
+Worker → Main:  { type: 'RESULT', pieces: TrayPiece[], warnings: string[] }
+Worker → Main:  { type: 'ERROR', message: string }
+```
+
+---
+
+## Local Persistence
+
+File: `apps/marker/src/db/database.ts`
+
+All customer data stays on the user's machine. No backend
+required for core functionality.
+
+```typescript
+import Dexie, { Table } from 'dexie'
+import type { MarkerDocument } from '../marker/schema'
+
+interface RestorePoint {
+  id: string
+  markerId: string
+  label: string
+  snapshot: MarkerDocument
+  createdAt: string
+}
+
+class MarkerDatabase extends Dexie {
+  markers!: Table<MarkerDocument>
+  restorePoints!: Table<RestorePoint>
+
+  constructor() {
+    super('nestiq-marker')
+    this.version(1).stores({
+      markers: 'id, name, updatedAt',
+      restorePoints: 'id, markerId, createdAt'
+    })
+  }
+}
+
+export const db = new MarkerDatabase()
+```
+
+Auto-save strategy:
+- Debounce 2 seconds after any store mutation
+- Save full `MarkerDocument` as JSON to IndexedDB
+- Fire-and-forget — never block the UI for save
+- Save a restore point before every Auto-Nest run
+- Maximum 20 restore points per marker (delete oldest first)
+
+---
+
+## Security Rules (non-negotiable)
+
+1. **Pattern geometry NEVER sent to any server.** If AI nesting
+   is ever called, send ONLY bounding boxes `{x, y, w, h}` and
+   rotation rules — never polygon points.
+
+2. No secrets or API keys in the frontend bundle. Use
+   `import.meta.env.VITE_*` environment variables only.
+
+3. All production dependencies pinned with exact versions
+   (no `^` or `~` in `dependencies` block of `package.json`).
+
+---
+
+## Coding Standards
+
+- TypeScript strict mode. **No `any`**. No type assertions without
+  an explanatory comment.
+- Modules in `marker/`, `nest/`, `canvas/collision/` are **pure**:
+  zero React imports, zero Zustand imports, zero side effects.
+  Input in → output out. These are unit-testable without a DOM.
+- React components are thin: read from store, render, dispatch
+  commands. Zero business logic inside JSX files.
+- One primary export per file. No barrel `index.ts` re-exports
+  inside `src/` (only acceptable in `packages/`).
+- Comments explain **why**, not what. Assume the reader knows
+  TypeScript.
+- Mark incomplete work with `// TODO(phase-N): description` —
+  never silent stubs.
+- Every selector in `marker/selectors.ts` and every algorithm in
+  `nest/heuristic.ts` must have a Vitest unit test before that
+  step is considered complete.
+
+---
+
+## Build Order
+
+Execute these steps in strict sequence. Do not start a step
+until the previous one passes its verification check.
+
+### Step 1 — Scaffold
+Create: `package.json`, `vite.config.ts`, `tsconfig.json`,
+`tsconfig.app.json`, `tsconfig.node.json`, `index.html`,
+`src/main.tsx`, `src/App.tsx` (empty div, no logic).
+
+`package.json` must match PDS versions exactly:
+- react: 19.2.0, react-dom: 19.2.0
+- zustand: 5.0.8
+- vite: 7.1.0, typescript: ~5.9.0
+- Add: konva: 9.3.18, dexie: 4.0.11
+
+✓ Verify: `npm run dev --workspace=apps/marker` serves a blank page
+with no TypeScript errors.
+
+---
+
+### Step 2 — Document Model
+Create: `src/marker/schema.ts` with all types from the
+"Core Data Model" section above — fully typed, no stubs.
+Create: `src/marker/selectors.ts` with all pure functions
+from the "Key Computed Selectors" section above.
+Create: `src/marker/migrations.ts` with a `migrate(raw: unknown)`
+function that returns a `MarkerDocument` at schemaVersion 2.
+
+✓ Verify: `npm run typecheck --workspace=apps/marker` passes.
+✓ Verify: Vitest unit tests for all selectors pass.
+
+---
+
+### Step 3 — Stores
+Create: `src/store/markerStore.ts`
+- State: `MarkerDocument | null` (null = no marker open)
+- Actions: `loadMarker`, `updatePiece`, `addPiece`, `removePiece`,
+  `setFabricWidth`, `addDefectZone`, `addSpliceLine`, `undo`, `redo`
+- Undo/redo: command pattern, keep last 50 snapshots in memory
+
+Create: `src/store/viewportStore.ts`
+- State: `zoom: number, panX: number, panY: number`
+- Actions: `setZoom`, `setPan`, `zoomToFit(markerLength, fabricWidth)`
+
+Create: `src/store/uiStore.ts`
+- State: `activeTool`, `selection: string[]`, `dockTab`, `statusMessage`
+- Actions: `setTool`, `setSelection`, `addToSelection`,
+  `clearSelection`, `setStatus`
+
+✓ Verify: stores import without circular dependencies.
+
+---
+
+### Step 4 — Canvas Foundation
+Create: `src/canvas/MarkerCanvas.ts`
+- Class that accepts a container `HTMLDivElement`
+- Creates a `Konva.Stage` with 4 layers in correct order
+- Exposes `update(doc, viewport)` method called by React on store change
+- Owns the cm→px coordinate transform (defined in "Canvas Architecture")
+
+Create: `src/canvas/layers/FabricLayer.ts`
+- Renders fabric rectangle (light grey fill)
+- Renders dashed vertical line at `fabricWidth`
+- Renders horizontal ruler ticks every 10 cm
+
+✓ Verify: A hardcoded 150cm × 500cm fabric renders on screen.
+✓ Verify: Zoom in/out with `+`/`-` keys works. Pan with middle-mouse works.
+
+---
+
+### Step 5 — Piece Rendering + Drag
+Create: `src/canvas/layers/PieceLayer.ts`
+- One `Konva.Group` per `PlacedPiece`
+- Group contains: `Konva.Line` (polygon), `Konva.Text` (name + size)
+- Apply `piece.cache()` after first render
+- Viewport culling: skip groups outside camera bounds
+
+Create: `src/canvas/collision/aabb.ts`
+Create: `src/canvas/collision/sat.ts`
+Create: `src/canvas/tools/DragTool.ts`
+- On drag: collision check vs all other pieces + fabric bounds
+- On collision: apply inverse MTV (instant snap, no animation)
+- On drag end: dispatch `updatePiece` to markerStore
+
+✓ Verify: Seed the markerStore with 3 hardcoded test pieces.
+✓ Verify: Drag a piece — it snaps correctly off other pieces and walls.
+✓ Verify: No visible frame drops during drag.
+
+---
+
+### Step 6 — UI Shell
+Create all components in `src/components/`:
+- `TopBar.tsx` — logo, undo/redo buttons, save indicator, ⌘K trigger
+- `PieceTray.tsx` — scrollable list grouped by piece × size × fabric
+- `BottomRibbon.tsx` — live utilization, length, consumption, status chip
+- `RightDock.tsx` — tabbed: Piece / Order / Options / Keys
+- `StatusBar.tsx` — colour-coded persistent message bar
+- `App.tsx` — assembles layout per the spec in "UI Layout" section
+
+✓ Verify: Full layout renders with tray, canvas, dock, ribbon, status bar.
+✓ Verify: All ribbon values update live when a piece is dragged.
+
+---
+
+### Step 7 — DXF Import
+Create: `src/io/workers/dxfWorker.ts`
+Create: `src/io/dxfImporter.ts` (orchestrates the worker)
+
+Implement all 8 capabilities listed in the "DXF Import" section.
+Use drag-and-drop onto the canvas as the entry point.
+
+✓ Verify: A basic AAMA DXF file loads and all pieces appear in the tray.
+✓ Verify: UI remains responsive during parse (worker is off main thread).
+
+---
+
+### Step 8 — Save / Load
+Create: `src/db/database.ts` (Dexie setup)
+Create: `src/io/markerJson.ts` (serialise/deserialise MarkerDocument)
+
+Wire auto-save: subscribe to markerStore changes, debounce 2s,
+write to IndexedDB. On app load, show the last-opened marker.
+
+✓ Verify: Place pieces → close tab → reopen → all pieces are restored.
+✓ Verify: Save indicator in top bar reflects saved/unsaved state.
+
+---
+
+### Step 9 — Auto-Nest
+Create: `src/nest/heuristic.ts` (algorithm)
+Create a `NestWorker` that wraps it with the message protocol.
+Wire to an "Auto-Nest" button in the top bar with a progress bar.
+
+✓ Verify: Auto-nest places a 10-piece order onto the fabric.
+✓ Verify: Utilization reported in ribbon is > 60%.
+✓ Verify: UI does not freeze during nesting.
+
+---
+
+### Step 10 — Export
+Create: `src/io/dxfExporter.ts` — AAMA DXF R12 export
+Create: `src/io/hpglExporter.ts` — HPGL `.plt` cut data
+
+Wire to export buttons in the right dock Options tab.
+
+✓ Verify: Exported DXF opens correctly in any DXF viewer.
+✓ Verify: HPGL file contains correct PU/PD commands at 1 plu = 0.025mm.
+
+---
+
+## When Resuming After a Context Reset
+
+When starting a new Claude Code conversation on this project,
+always begin with:
+
+> "Read CLAUDE.md fully. I am continuing from Step [N].
+> Here is the current directory listing: [paste `find src -type f`].
+> Continue from where we left off."
+
+The architecture lives in this file — not in chat history.
