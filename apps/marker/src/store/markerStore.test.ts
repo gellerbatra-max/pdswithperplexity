@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { MarkerDocument, PlacedPiece } from '@/marker/schema';
+import type { MarkerDocument, PlacedPiece, TrayPiece } from '@/marker/schema';
 import { HISTORY_LIMIT, useMarkerStore } from './markerStore';
 
 const piece = (id: string): PlacedPiece => ({
@@ -141,6 +141,94 @@ describe('mutations', () => {
   });
 });
 
+describe('updateSettings', () => {
+  beforeEach(() => {
+    state().loadMarker(doc());
+  });
+
+  it('patches several settings in one history step', () => {
+    state().updateSettings({ endAllowance: 8, cutterBuffer: 0.5, rotationRule: 'strict' });
+    expect(state().document?.endAllowance).toBe(8);
+    expect(state().document?.cutterBuffer).toBe(0.5);
+    expect(state().document?.rotationRule).toBe('strict');
+    expect(state().past).toHaveLength(1);
+  });
+
+  it('leaves untouched settings alone', () => {
+    state().updateSettings({ endAllowance: 8 });
+    expect(state().document?.fabricWidth).toBe(150);
+  });
+});
+
+describe('placeFromTray', () => {
+  const trayPiece = (id: string, quantity: number, placed: number): TrayPiece => ({
+    id,
+    name: 'Front',
+    size: 'M',
+    bundle: 'B1',
+    fabricCode: 'A',
+    geometry: [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+    ],
+    layDirection: '2way',
+    quantity,
+    placed,
+  });
+
+  beforeEach(() => {
+    const document = doc();
+    document.trayPieces = [trayPiece('t1', 2, 0)];
+    state().loadMarker(document);
+  });
+
+  it('places a piece and counts it in one step', () => {
+    state().placeFromTray('t1', { x: 5, y: 5 });
+    expect(state().document?.pieces).toHaveLength(1);
+    expect(state().document?.trayPieces[0]?.placed).toBe(1);
+    // One history entry, so undo removes the piece and the count together.
+    expect(state().past).toHaveLength(1);
+  });
+
+  it('copies the tray piece definition onto the placed piece', () => {
+    state().placeFromTray('t1', { x: 5, y: 5 });
+    const [piece] = state().document?.pieces ?? [];
+    expect(piece?.pieceDefId).toBe('t1');
+    expect(piece?.name).toBe('Front');
+    expect(piece?.bundle).toBe('B1');
+    expect(piece?.position).toEqual({ x: 5, y: 5 });
+    expect(piece?.placed).toBe(true);
+  });
+
+  it('gives each placement a distinct id', () => {
+    state().placeFromTray('t1', { x: 0, y: 0 });
+    state().placeFromTray('t1', { x: 20, y: 0 });
+    const ids = state().document?.pieces.map((piece) => piece.id) ?? [];
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('refuses once the quantity is exhausted', () => {
+    state().placeFromTray('t1', { x: 0, y: 0 });
+    state().placeFromTray('t1', { x: 20, y: 0 });
+    state().placeFromTray('t1', { x: 40, y: 0 });
+    expect(state().document?.pieces).toHaveLength(2);
+    expect(state().document?.trayPieces[0]?.placed).toBe(2);
+  });
+
+  it('undoes the piece and the count together', () => {
+    state().placeFromTray('t1', { x: 5, y: 5 });
+    state().undo();
+    expect(state().document?.pieces).toHaveLength(0);
+    expect(state().document?.trayPieces[0]?.placed).toBe(0);
+  });
+
+  it('ignores an unknown tray piece', () => {
+    state().placeFromTray('nope', { x: 0, y: 0 });
+    expect(state().document?.pieces).toHaveLength(0);
+  });
+});
+
 describe('undo and redo', () => {
   beforeEach(() => {
     state().loadMarker(doc());
@@ -181,6 +269,11 @@ describe('undo and redo', () => {
     expect(state().future).toHaveLength(1);
     state().addPiece(piece('b'));
     expect(state().future).toEqual([]);
+  });
+
+  it('does not record a snapshot for a change that did nothing', () => {
+    state().placeFromTray('missing-tray-piece', { x: 0, y: 0 });
+    expect(state().past).toEqual([]);
   });
 
   it(`keeps at most ${HISTORY_LIMIT} snapshots`, () => {

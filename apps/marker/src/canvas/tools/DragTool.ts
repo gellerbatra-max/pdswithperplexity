@@ -183,6 +183,8 @@ export interface DragToolCallbacks {
   /** Read at drag time, so the tool always sees the current document. */
   readonly getContext: () => DragToolContext | null;
   readonly onCommit: (pieceId: string, position: Point) => void;
+  /** Additive when the shift key is held, matching the shortcut table. */
+  readonly onSelect: (pieceId: string, additive: boolean) => void;
 }
 
 export class DragTool {
@@ -191,6 +193,10 @@ export class DragTool {
   /** Make a piece group draggable and route its events through collision. */
   attach(group: Konva.Group, pieceId: string): void {
     group.draggable(true);
+
+    group.on('mousedown touchstart', (event) => {
+      this.callbacks.onSelect(pieceId, event.evt.shiftKey === true);
+    });
 
     // A cached group cannot repaint while it moves.
     group.on('dragstart', () => group.clearCache());

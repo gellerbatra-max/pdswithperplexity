@@ -26,6 +26,7 @@ export interface MarkerCanvasCallbacks {
   onStageResize: (width: number, height: number) => void;
   /** A drag finished: the piece's resolved, collision-free position. */
   onPieceMoved: (pieceId: string, position: Point) => void;
+  onPieceSelected: (pieceId: string, additive: boolean) => void;
 }
 
 export class MarkerCanvas {
@@ -78,12 +79,17 @@ export class MarkerCanvas {
       new DragTool({
         getContext: () => this.context,
         onCommit: callbacks.onPieceMoved,
+        onSelect: callbacks.onPieceSelected,
       }),
     );
   }
 
-  /** Called by React whenever the document or the camera changes. */
-  update(document: MarkerDocument | null, viewport: ViewportSnapshot): void {
+  /** Called by React whenever the document, camera or selection changes. */
+  update(
+    document: MarkerDocument | null,
+    viewport: ViewportSnapshot,
+    selection: readonly string[],
+  ): void {
     if (!document) {
       this.context = null;
       this.fabricLayer.clear();
@@ -104,6 +110,7 @@ export class MarkerCanvas {
       transform,
       stageWidth: this.stage.width(),
       stageHeight: this.stage.height(),
+      selection,
     });
   }
 

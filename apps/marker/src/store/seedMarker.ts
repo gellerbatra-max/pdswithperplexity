@@ -1,4 +1,4 @@
-import type { MarkerDocument, PlacedPiece, Point } from '@/marker/schema';
+import type { MarkerDocument, PlacedPiece, Point, TrayPiece } from '@/marker/schema';
 
 /**
  * A 150 cm marker with three test pieces, following the seedDocument pattern
@@ -48,6 +48,24 @@ const piece = (
   blocked: false,
 });
 
+const tray = (
+  id: string,
+  name: string,
+  bundle: string,
+  geometry: Point[],
+  placed: number,
+): TrayPiece => ({
+  id,
+  name,
+  size: 'M',
+  bundle,
+  fabricCode: 'A',
+  geometry,
+  layDirection: '2way',
+  quantity: 1,
+  placed,
+});
+
 export const createSeedMarker = (): MarkerDocument => ({
   id: 'seed-marker',
   schemaVersion: 2,
@@ -61,10 +79,23 @@ export const createSeedMarker = (): MarkerDocument => ({
     piece('back', 'Back', rectangle(46, 62), { x: 62, y: 10 }),
     piece('sleeve', 'Sleeve', sleeve(), { x: 114, y: 14 }),
   ],
-  trayPieces: [],
+  // Two bundles of the same three pieces: the first is fully placed, the
+  // second is not. That makes the marker PARTIAL with one complete garment,
+  // so the ribbon shows a real utilisation and consumption rather than zero.
+  trayPieces: [
+    tray('front-1', 'Front', 'B1', rectangle(46, 62), 1),
+    tray('back-1', 'Back', 'B1', rectangle(46, 62), 1),
+    tray('sleeve-1', 'Sleeve', 'B1', sleeve(), 1),
+    tray('front-2', 'Front', 'B2', rectangle(46, 62), 0),
+    tray('back-2', 'Back', 'B2', rectangle(46, 62), 0),
+    tray('sleeve-2', 'Sleeve', 'B2', sleeve(), 0),
+  ],
   defectZones: [],
   spliceLines: [],
-  order: { model: '', sizes: [] },
+  order: {
+    model: 'TEE-100',
+    sizes: [{ size: 'M', quantity: 2, fabricCode: 'A' }],
+  },
   approvalState: 'draft',
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',

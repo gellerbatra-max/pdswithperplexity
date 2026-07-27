@@ -15,6 +15,8 @@ import type { MarkerTransform } from '../types';
 
 const PIECE_FILL = '#dbeafe';
 const PIECE_STROKE = '#2563eb';
+const PIECE_STROKE_SELECTED = '#f59e0b';
+const SELECTED_STROKE_WIDTH = 2;
 const LABEL_FILL = '#1e3a8a';
 const LABEL_FONT_SIZE = 11;
 
@@ -26,6 +28,7 @@ export interface PieceLayerInput {
   readonly transform: MarkerTransform;
   readonly stageWidth: number;
   readonly stageHeight: number;
+  readonly selection: readonly string[];
 }
 
 interface PieceNode {
@@ -37,6 +40,7 @@ interface PieceNode {
   rotation: number;
   flipped: boolean;
   scale: number;
+  selected: boolean;
   /** Local bounds in px, for culling without recomputing the polygon. */
   localMinX: number;
   localMinY: number;
@@ -111,6 +115,7 @@ export class PieceLayer {
       rotation: Number.NaN,
       flipped: false,
       scale: Number.NaN,
+      selected: false,
       localMinX: 0,
       localMinY: 0,
       localMaxX: 0,
@@ -133,6 +138,18 @@ export class PieceLayer {
       node.scale !== transform.scale;
 
     if (stale) this.rebuild(node, piece, transform);
+
+    const selected = input.selection.includes(piece.id);
+    if (selected !== node.selected) {
+      node.selected = selected;
+      node.polygon.stroke(selected ? PIECE_STROKE_SELECTED : PIECE_STROKE);
+      node.polygon.strokeWidth(selected ? SELECTED_STROKE_WIDTH : 1);
+      // A cached group keeps painting the old stroke.
+      if (node.cached) {
+        node.group.clearCache();
+        node.cached = false;
+      }
+    }
 
     node.group.position({
       x: transform.x(piece.position.x),
