@@ -1,24 +1,23 @@
 import { worldToScreen } from '@/canvas';
-import { Icon, type IconName } from '@/components/Icon';
+import { Icon } from '@/components/Icon';
 import { BoundsOps } from '@/geometry';
 import { pieceBounds } from '@/pattern';
-import { useDocumentStore, useSelectionStore, useViewportStore } from '@/store';
+import {
+  duplicatePiece,
+  pieceRef,
+  removePiece,
+  useDocumentStore,
+  useSelectionStore,
+  useViewportStore,
+} from '@/store';
 
-interface ContextAction {
-  readonly id: string;
-  readonly label: string;
-  readonly icon: IconName;
-}
-
-/** Actions that will apply to the current selection once editing tools exist. */
-const ACTIONS: readonly ContextAction[] = [
-  { id: 'mirror', label: 'Mirror', icon: 'grade' },
-  { id: 'rotate', label: 'Rotate', icon: 'maximize' },
-  { id: 'seam', label: 'Seam allowance', icon: 'ruler' },
-  { id: 'notch', label: 'Notch', icon: 'minus' },
-  { id: 'grain', label: 'Grain', icon: 'design' },
-  { id: 'duplicate', label: 'Duplicate', icon: 'plus' },
-];
+/*
+ * This bar used to carry five more actions — Mirror, Rotate, Seam allowance,
+ * Notch, Grain — all permanently disabled. They are gone rather than greyed:
+ * an affordance that never activates is worse than an absent one, because it
+ * reads as a bug rather than as a gap. Duplicate and Remove remain because they
+ * work.
+ */
 
 /** Keeps the bar clear of the stage edges and the rulers. */
 const EDGE_INSET_PX = 150;
@@ -36,6 +35,7 @@ const GAP_ABOVE_SELECTION_PX = 14;
 export const ContextToolbar = () => {
   const pieces = useDocumentStore((s) => s.document.pieces);
   const selectedPieceIds = useSelectionStore((s) => s.selectedPieceIds);
+  const select = useSelectionStore((s) => s.select);
   const camera = useViewportStore((s) => s.camera);
 
   if (selectedPieceIds.size === 0) return null;
@@ -74,18 +74,43 @@ export const ContextToolbar = () => {
 
       <span className="context-toolbar__divider" role="presentation" />
 
-      {ACTIONS.map((action) => (
-        <button
-          key={action.id}
-          type="button"
-          className="context-toolbar__action"
-          title={`${action.label} — not built yet`}
-          disabled
-        >
-          <Icon name={action.icon} size={13} />
-          <span>{action.label}</span>
-        </button>
-      ))}
+      {/* Duplicate and Remove need no geometry tools, so they are real. Both
+          act on a single piece; with a multi-selection they stay disabled
+          rather than guessing which piece is meant. */}
+      <button
+        type="button"
+        className="context-toolbar__action"
+        title={
+          selected.length === 1
+            ? 'Duplicate piece'
+            : 'Duplicate — select a single piece'
+        }
+        disabled={selected.length !== 1}
+        onClick={() => {
+          const source = selected[0];
+          if (!source) return;
+          select(pieceRef(duplicatePiece(source.id)), false);
+        }}
+      >
+        <Icon name="plus" size={13} />
+        <span>Duplicate</span>
+      </button>
+
+      <button
+        type="button"
+        className="context-toolbar__action"
+        title={selected.length === 1 ? 'Remove piece' : 'Remove — select a single piece'}
+        disabled={selected.length !== 1}
+        onClick={() => {
+          const target = selected[0];
+          if (!target) return;
+          // Selection is pruned by the selection store's document subscription.
+          removePiece(target.id);
+        }}
+      >
+        <Icon name="minus" size={13} />
+        <span>Remove</span>
+      </button>
     </div>
   );
 };

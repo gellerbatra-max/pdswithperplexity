@@ -1,15 +1,18 @@
 import { BoundsOps, type Vec2 } from '@/geometry';
 import {
   boundarySegments,
+  flattenSegment,
   pieceBounds,
   pointAlongSegment,
   findPoint,
   findSegment,
   pointPositions,
+  seamAllowanceRing,
   segmentEndpoints,
   type PatternPiece,
   type PieceId,
   type PointId,
+  type SegmentId,
 } from '@/pattern';
 import type { LayerVisibility } from '@/store/types';
 import { worldToScreen, type Camera } from './camera';
@@ -20,9 +23,16 @@ export interface Scene {
   readonly pieces: readonly PatternPiece[];
   readonly selectedPieceIds: ReadonlySet<PieceId>;
   readonly selectedPointIds: ReadonlySet<PointId>;
+  readonly selectedSegmentIds: ReadonlySet<SegmentId>;
   /** What the pointer is over, for hover feedback. */
   readonly hoveredPieceId: PieceId | null;
   readonly hoveredPointId: PointId | null;
+  readonly hoveredSegmentId: SegmentId | null;
+  /**
+   * True while a drag is being previewed. The edit is not in the document yet,
+   * so the outline is drawn as a draft to make "not committed" visible.
+   */
+  readonly isPreview: boolean;
 }
 
 /**
@@ -79,12 +89,135 @@ const tracePiece = (
       const c1 = worldToScreen(camera, segment.geometry.control1);
       const c2 = worldToScreen(camera, segment.geometry.control2);
       ctx.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, to.x, to.y);
+    } else if (segment.geometry.kind === 'arc') {
+      // Stroked from the adaptive flattening rather than `ctx.arc`, so the
+      // drawn curve is the same one the hit test and the offset see. Drawing an
+      // arc as its chord — which is what the fallback below used to do — put a
+      // straight line on screen for geometry that was not straight.
+      for (const sample of flattenSegment(ends[0], ends[1], segment.geometry)) {
+        const p = worldToScreen(camera, sample);
+        ctx.lineTo(p.x, p.y);
+      }
     } else {
       ctx.lineTo(to.x, to.y);
     }
   }
 
   if (piece.closed && started) ctx.closePath();
+};
+
+/**
+ * The cut line — the outline offset outward by the seam allowance.
+ *
+ * A real second curve, traced as a polyline because that is what the offset
+ * produces. Drawn dashed and thin: it is a reference line the cutter follows,
+ * not a heavy band, and it must never be mistaken for the net line.
+ */
+const drawSeamAllowance = (
+  ctx: CanvasRenderingContext2D,
+  piece: PatternPiece,
+  camera: Camera,
+  theme: CanvasTheme,
+): void => {
+  const ring = seamAllowanceRing(piece);
+  if (ring.length < 3) return;
+
+  ctx.beginPath();
+  ring.forEach((point, index) => {
+    const p = worldToScreen(camera, point);
+    if (index === 0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  });
+  ctx.closePath();
+
+  ctx.strokeStyle = theme.seamAllowance;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([6, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+};
+
+/**
+ * Control handles for a selected cubic edge: a tether from each endpoint out to
+ * its handle, and a knob to grab.
+ *
+ * Drawn only for selected segments, which is also the only case `pickHandle`
+ * will match — an affordance that cannot be seen must not be draggable. Knobs
+ * are sized in screen space so they stay grabbable at any zoom, and drawn as
+ * hollow diamonds so they never read as outline points.
+ */
+const drawSegmentHandles = (
+  ctx: CanvasRenderingContext2D,
+  piece: PatternPiece,
+  segmentId: SegmentId,
+  camera: Camera,
+  theme: CanvasTheme,
+): void => {
+  const segment = findSegment(piece, segmentId);
+  if (!segment || segment.geometry.kind !== 'cubic') return;
+  const ends = segmentEndpoints(piece, segment);
+  if (!ends) return;
+
+  const pairs: readonly (readonly [Vec2, Vec2])[] = [
+    [ends[0], segment.geometry.control1],
+    [ends[1], segment.geometry.control2],
+  ];
+
+  for (const [anchor, handle] of pairs) {
+    const a = worldToScreen(camera, anchor);
+    const h = worldToScreen(camera, handle);
+
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(h.x, h.y);
+    ctx.strokeStyle = theme.gradeVector;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.beginPath();
+    ctx.moveTo(h.x, h.y - 4);
+    ctx.lineTo(h.x + 4, h.y);
+    ctx.lineTo(h.x, h.y + 4);
+    ctx.lineTo(h.x - 4, h.y);
+    ctx.closePath();
+    ctx.fillStyle = theme.background;
+    ctx.fill();
+    ctx.strokeStyle = theme.outlineSelected;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+};
+
+/** Highlights one boundary segment, following its curve rather than its chord. */
+const traceSegment = (
+  ctx: CanvasRenderingContext2D,
+  piece: PatternPiece,
+  segmentId: SegmentId,
+  camera: Camera,
+): boolean => {
+  const segment = findSegment(piece, segmentId);
+  if (!segment) return false;
+  const ends = segmentEndpoints(piece, segment);
+  if (!ends) return false;
+
+  const start = worldToScreen(camera, ends[0]);
+  ctx.beginPath();
+  ctx.moveTo(start.x, start.y);
+
+  if (segment.geometry.kind === 'cubic') {
+    const c1 = worldToScreen(camera, segment.geometry.control1);
+    const c2 = worldToScreen(camera, segment.geometry.control2);
+    const end = worldToScreen(camera, ends[1]);
+    ctx.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, end.x, end.y);
+  } else {
+    for (const sample of flattenSegment(ends[0], ends[1], segment.geometry)) {
+      const p = worldToScreen(camera, sample);
+      ctx.lineTo(p.x, p.y);
+    }
+  }
+  return true;
 };
 
 const drawNotches = (
@@ -195,31 +328,29 @@ const drawInternalLines = (
   ctx.setLineDash([]);
 };
 
+interface PieceRenderState {
+  readonly selected: boolean;
+  readonly hovered: boolean;
+  readonly selectedPointIds: ReadonlySet<PointId>;
+  readonly hoveredPointId: PointId | null;
+  readonly selectedSegmentIds: ReadonlySet<SegmentId>;
+  readonly hoveredSegmentId: SegmentId | null;
+  readonly highlightGradePoints: boolean;
+  readonly isPreview: boolean;
+}
+
 const drawPiece = (
   ctx: CanvasRenderingContext2D,
   piece: PatternPiece,
   camera: Camera,
-  selected: boolean,
   theme: CanvasTheme,
   layers: LayerVisibility,
-  selectedPointIds: ReadonlySet<PointId>,
-  highlightGradePoints: boolean,
-  hovered: boolean,
-  hoveredPointId: PointId | null,
+  state: PieceRenderState,
 ): void => {
   if (piece.points.length === 0) return;
+  const { selected, hovered, selectedPointIds, hoveredPointId } = state;
 
-  if (layers.seam && piece.seamAllowance > 0 && piece.closed) {
-    // TODO(geometry-editing): replace this widened stroke with a real polygon
-    // offset. A stroke is not an offset — it does not mitre corners, handle
-    // self-intersection on concave curves, or produce a cut line we can export.
-    // See DEVELOPMENT.md.
-    tracePiece(ctx, piece, camera);
-    ctx.strokeStyle = theme.seamAllowance;
-    ctx.lineWidth = Math.max(1, piece.seamAllowance * camera.zoom * 2);
-    ctx.lineJoin = 'round';
-    ctx.stroke();
-  }
+  if (layers.seam) drawSeamAllowance(ctx, piece, camera, theme);
 
   if (layers.net) {
     // Hover reads as a soft halo beneath the outline, so selection still wins.
@@ -235,7 +366,35 @@ const drawPiece = (
     ctx.strokeStyle = selected ? theme.outlineSelected : theme.outline;
     ctx.lineWidth = selected ? 2 : 1.5;
     ctx.lineJoin = 'round';
+    // A drag in flight is drawn dashed, so an uncommitted edit never looks
+    // like a saved one.
+    if (state.isPreview) ctx.setLineDash([7, 4]);
     ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Segment feedback sits above the outline so a picked edge is unambiguous.
+    for (const segmentId of state.selectedSegmentIds) {
+      if (traceSegment(ctx, piece, segmentId, camera)) {
+        ctx.strokeStyle = theme.outlineSelected;
+        ctx.lineWidth = 3.5;
+        ctx.stroke();
+      }
+    }
+    if (state.hoveredSegmentId && !state.selectedSegmentIds.has(state.hoveredSegmentId)) {
+      if (traceSegment(ctx, piece, state.hoveredSegmentId, camera)) {
+        ctx.strokeStyle = theme.hover;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+    }
+
+    // Handles ride with the control-points layer: they are control points, and
+    // hiding that layer should hide them too.
+    if (layers.nodes) {
+      for (const segmentId of state.selectedSegmentIds) {
+        drawSegmentHandles(ctx, piece, segmentId, camera, theme);
+      }
+    }
   }
 
   if (layers.internals) drawInternalLines(ctx, piece, camera, theme);
@@ -250,7 +409,7 @@ const drawPiece = (
       const p = worldToScreen(camera, point.position);
       const isSelected = selectedPointIds.has(point.id);
       const isHovered = hoveredPointId === point.id;
-      const isGradePoint = highlightGradePoints && point.gradeRuleId !== undefined;
+      const isGradePoint = state.highlightGradePoints && point.gradeRuleId !== undefined;
 
       if (isHovered && !isSelected) {
         ctx.beginPath();
@@ -273,10 +432,19 @@ const drawPiece = (
         ctx.fillStyle = isSelected ? theme.nodeSelected : theme.gradePoint;
         ctx.fillRect(p.x - half, p.y - half, half * 2, half * 2);
       } else {
-        ctx.beginPath();
+        const radius = isSelected ? 4 : selected ? 3.5 : 2.5;
         ctx.fillStyle = isSelected ? theme.nodeSelected : selected ? theme.nodeSelected : theme.node;
-        ctx.arc(p.x, p.y, isSelected ? 4 : selected ? 3.5 : 2.5, 0, Math.PI * 2);
-        ctx.fill();
+        // A point's role decides whether the edges either side stay tangent, so
+        // it has to be visible without clicking: smooth points are round, hard
+        // corners are square. Otherwise two points that behave differently under
+        // a handle drag look identical.
+        if (point.role === 'corner') {
+          ctx.fillRect(p.x - radius, p.y - radius, radius * 2, radius * 2);
+        } else {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
     }
   }
@@ -372,18 +540,17 @@ export const renderScene = (
   }
 
   for (const piece of scene.pieces) {
-    drawPiece(
-      ctx,
-      piece,
-      camera,
-      scene.selectedPieceIds.has(piece.id),
-      theme,
-      options.layers,
-      scene.selectedPointIds,
-      options.highlightGradePoints,
-      scene.hoveredPieceId === piece.id,
-      scene.hoveredPointId,
-    );
+    drawPiece(ctx, piece, camera, theme, options.layers, {
+      selected: scene.selectedPieceIds.has(piece.id),
+      hovered: scene.hoveredPieceId === piece.id,
+      selectedPointIds: scene.selectedPointIds,
+      hoveredPointId: scene.hoveredPointId,
+      selectedSegmentIds: scene.selectedSegmentIds,
+      hoveredSegmentId: scene.hoveredSegmentId,
+      highlightGradePoints: options.highlightGradePoints,
+      // Only the piece actually being dragged draws as a draft.
+      isPreview: scene.isPreview && scene.selectedPieceIds.has(piece.id),
+    });
   }
 
   ctx.restore();

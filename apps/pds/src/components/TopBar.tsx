@@ -1,4 +1,4 @@
-import { useDocumentStore, useHistoryStore, useUiStore } from '@/store';
+import { renameDocument, useDocumentStore, useHistoryStore, useUiStore } from '@/store';
 import { Icon } from './Icon';
 import { IconButton } from './IconButton';
 import { SaveState } from './SaveState';
@@ -10,7 +10,6 @@ import { WorkspaceSwitcher } from './WorkspaceSwitcher';
  */
 export const TopBar = () => {
   const documentName = useDocumentStore((s) => s.document.name);
-  const renameDocument = useDocumentStore((s) => s.renameDocument);
 
   const canUndo = useHistoryStore((s) => s.canUndo);
   const canRedo = useHistoryStore((s) => s.canRedo);

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { PieceId, PointId } from '@/pattern';
+import type { PieceId, PointId, SegmentId } from '@/pattern';
 import { useDocumentStore } from './documentStore';
 import { refExists, sameRef, selectionKey, type SelectionRef } from './selection';
 
@@ -21,6 +21,7 @@ interface Derived {
   readonly selectedKeys: ReadonlySet<string>;
   readonly selectedPieceIds: ReadonlySet<PieceId>;
   readonly selectedPointIds: ReadonlySet<PointId>;
+  readonly selectedSegmentIds: ReadonlySet<SegmentId>;
   readonly primary: SelectionRef | null;
 }
 
@@ -28,19 +29,22 @@ const derive = (selection: readonly SelectionRef[]): Derived => {
   const selectedKeys = new Set<string>();
   const selectedPieceIds = new Set<PieceId>();
   const selectedPointIds = new Set<PointId>();
+  const selectedSegmentIds = new Set<SegmentId>();
 
   for (const ref of selection) {
     selectedKeys.add(selectionKey(ref));
-    // A selected point implies its piece is the one in context, which is what
-    // the renderer and the piece tree want to show.
+    // A selected point or segment implies its piece is the one in context,
+    // which is what the renderer and the piece tree want to show.
     selectedPieceIds.add(ref.pieceId);
     if (ref.kind === 'point') selectedPointIds.add(ref.pointId);
+    if (ref.kind === 'segment') selectedSegmentIds.add(ref.segmentId);
   }
 
   return {
     selectedKeys,
     selectedPieceIds,
     selectedPointIds,
+    selectedSegmentIds,
     primary: selection.length > 0 ? (selection[selection.length - 1] ?? null) : null,
   };
 };

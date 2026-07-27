@@ -24,9 +24,13 @@ export const LAYERS: readonly LayerDescriptor[] = [
   { id: 'seam', label: 'Seam allowance', status: 'available' },
   { id: 'nodes', label: 'Control points', status: 'available' },
   { id: 'labels', label: 'Piece labels', status: 'available' },
-  { id: 'notches', label: 'Notches', status: 'planned' },
-  { id: 'grain', label: 'Grain lines', status: 'planned' },
-  { id: 'internals', label: 'Internal lines', status: 'planned' },
+  // These three do draw — `renderer.ts` has `drawNotches`, `drawGrainLine` and
+  // `drawInternalLines`, and all are gated on these toggles. They were listed
+  // as planned after the renderer caught up with them.
+  { id: 'notches', label: 'Notches', status: 'available' },
+  { id: 'grain', label: 'Grain lines', status: 'available' },
+  { id: 'internals', label: 'Internal lines', status: 'available' },
+  // Genuinely nothing behind this one yet: no annotation entity, no draw call.
   { id: 'annotation', label: 'Annotation', status: 'planned' },
 ];
 

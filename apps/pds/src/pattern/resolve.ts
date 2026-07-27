@@ -1,5 +1,11 @@
 import { BoundsOps, type Bounds, type Vec2 } from '@/geometry';
-import { flattenSegment, pointOnSegment } from './curve';
+import {
+  flattenSegment,
+  nearestOnSegment,
+  pointOnSegment,
+  segmentArcLength,
+  splitSegment,
+} from './curve';
 import type { PatternDocument } from './document';
 import type { PointId, SegmentId } from './ids';
 import type { PatternPiece, PieceSegment } from './piece';
@@ -103,17 +109,85 @@ export const documentBounds = (document: PatternDocument): Bounds =>
     .filter((bounds) => !BoundsOps.isEmpty(bounds))
     .reduce(BoundsOps.union, BoundsOps.EMPTY_BOUNDS);
 
-/** Arc length of a single segment, curves included. */
+/**
+ * Length cache, keyed on the piece.
+ *
+ * Deliberately *not* keyed on the segment: a straight segment whose endpoint
+ * moves keeps its identity, because `translatePoints` only rebuilds segments
+ * whose geometry object changed. The piece is always a new object after an
+ * edit, so it is the only safe key here.
+ */
+const lengthCache = new WeakMap<PatternPiece, Map<SegmentId, number>>();
+
+/**
+ * Arc length of a single segment, curves included.
+ *
+ * Integrated from the curve itself rather than summed off the flattened
+ * polyline, so the value depends on the geometry and not on how finely it
+ * happened to be sampled. Every point of measure reads through here.
+ */
 export const segmentLength = (piece: PatternPiece, segment: PieceSegment): number => {
+  let cache = lengthCache.get(piece);
+  if (!cache) {
+    cache = new Map();
+    lengthCache.set(piece, cache);
+  }
+  const cached = cache.get(segment.id);
+  if (cached !== undefined) return cached;
+
+  const ends = segmentEndpoints(piece, segment);
+  const length = ends ? segmentArcLength(ends[0], ends[1], segment.geometry) : 0;
+  cache.set(segment.id, length);
+  return length;
+};
+
+export interface SegmentProjection {
+  readonly segment: PieceSegment;
+  /** Parameter along the segment, 0 at `from` and 1 at `to`. */
+  readonly t: number;
+  readonly position: Vec2;
+  readonly distance: number;
+}
+
+/**
+ * Closest point on a piece's boundary to `p`, solved against the real curves.
+ *
+ * The single entry point for "what is under the pointer, and where along it" —
+ * picking an edge, splitting one, and placing a notch all need the same answer,
+ * and all of them need it to be the true closest point rather than the nearest
+ * flattening sample.
+ */
+export const projectOntoBoundary = (
+  piece: PatternPiece,
+  p: Vec2,
+): SegmentProjection | null => {
+  let best: SegmentProjection | null = null;
+  for (const segment of boundarySegments(piece)) {
+    const ends = segmentEndpoints(piece, segment);
+    if (!ends) continue;
+    const hit = nearestOnSegment(ends[0], ends[1], segment.geometry, p);
+    if (!best || hit.distance < best.distance) {
+      best = { segment, t: hit.t, position: hit.position, distance: hit.distance };
+    }
+  }
+  return best;
+};
+
+/**
+ * Distance along a segment from its start to parameter `t`.
+ *
+ * Notches are stored by parameter but read by pattern makers in millimetres
+ * from the seam start, which is how they are specified and checked.
+ */
+export const lengthAlongSegment = (
+  piece: PatternPiece,
+  segment: PieceSegment,
+  t: number,
+): number => {
   const ends = segmentEndpoints(piece, segment);
   if (!ends) return 0;
-  let total = 0;
-  let previous = ends[0];
-  for (const point of flattenSegment(ends[0], ends[1], segment.geometry)) {
-    total += Math.hypot(point.x - previous.x, point.y - previous.y);
-    previous = point;
-  }
-  return total;
+  const split = splitSegment(ends[0], ends[1], segment.geometry, Math.min(1, Math.max(0, t)));
+  return segmentArcLength(ends[0], split.at, split.left);
 };
 
 /** Total outline length. */

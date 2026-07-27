@@ -25,15 +25,20 @@ export const designWorkspace: WorkspaceModule = {
   Context: DesignContext,
   Stage: DesignStage,
   Panel: DesignPanel,
+  /*
+   * Only tools that do something.
+   *
+   * Design used to list seven more, rendered disabled — Point, Line, Curve,
+   * Seam allowance, Notch, Grain, Annotate. A dock full of controls that cannot
+   * be pressed teaches people the app is broken, and it hid the fact that the
+   * work those tools imply is reachable elsewhere: edges are split and notched
+   * by double-clicking them, seam allowance is per-piece and per-edge in the
+   * inspector, and shape is the Line/Curve/Arc control there. What is genuinely
+   * missing — drawing a new piece from nothing, grain, annotation — is recorded
+   * in DEVELOPMENT.md rather than mimed here.
+   */
   tools: [
-    { id: 'select', icon: 'cursor', label: 'Select', hint: 'Pick pieces and nodes', status: 'available', shortcut: 'V' },
+    { id: 'select', icon: 'cursor', label: 'Select', hint: 'Pick pieces, edges and points', status: 'available', shortcut: 'V' },
     { id: 'pan', icon: 'hand', label: 'Pan', hint: 'Drag the canvas', status: 'available', shortcut: 'H' },
-    { id: 'point', icon: 'dot', label: 'Point', hint: 'Place a construction point', status: 'planned', shortcut: 'P' },
-    { id: 'line', icon: 'line', label: 'Line', hint: 'Draw a straight segment', status: 'planned', shortcut: 'L' },
-    { id: 'curve', icon: 'curve', label: 'Curve', hint: 'Draw a shaped segment', status: 'planned', shortcut: 'C' },
-    { id: 'seam-allowance', icon: 'ruler', label: 'Seam allowance', hint: 'Offset the net line', status: 'planned' },
-    { id: 'notch', icon: 'notch', label: 'Notch', hint: 'Place and type notches', status: 'planned', shortcut: 'N' },
-    { id: 'grain', icon: 'arrow-v', label: 'Grain line', hint: 'Set grain direction', status: 'planned', shortcut: 'G' },
-    { id: 'annotate', icon: 'text', label: 'Annotate', hint: 'Piece name, text, symbols', status: 'planned' },
   ],
 };

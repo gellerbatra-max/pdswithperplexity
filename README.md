@@ -217,10 +217,66 @@ Selection and Geometry tabs compute live from the document (bounds, perimeter, a
 node breakdown); the first four draft layers drive the renderer; block search filters;
 zoom controls and zoom-to-fit are wired to the camera.
 
-Mock data, clearly marked: block library, history log, points of measure and AI
-suggestions. Placeholders: undo/redo (stub history store) and every drawing tool —
-the tool dock and context toolbar render them disabled. No pattern-engineering logic
-(offsetting, notching, grading, verification) exists yet.
+The Piece tab is a real editor. Name, code, fabric, cut quantity, seam
+allowance, cut-on-fold and mirrored-pair all write through commands, so every
+edit is undoable and propagates live to the tree, canvas and status bar. Text
+and number fields coalesce per piece and per field, so a typing burst is one
+undo step. Category stays read-only — it has no editor yet. The selection
+toolbar's **Duplicate** and **Remove** are likewise real; both act on a single
+piece and disable themselves on a multi-selection rather than guessing.
+
+Geometry can be moved and shaped. Design picks the smallest thing under the
+cursor — a point, then the edge it lies on, then the piece beneath both — and
+dragging any of them moves it. A selected curved edge shows its control handles
+as diamonds; dragging one reshapes the edge without moving its endpoints.
+Double-clicking an edge splits it where you click, and a selected point can be
+deleted, merging the two edges that met there. A drag paints a dashed draft and
+leaves the document alone until the pointer comes up, at which point one command
+lands on the undo stack; abandoning a drag therefore needs no rollback.
+
+Alt-double-click places a notch instead of a point; the selected edge lists its
+notches with their distance along the seam, in millimetres, and removes them.
+
+The splits are exact — de Casteljau subdivision, so adding a point does not move
+the outline, and notches and points of measure are re-anchored onto the halves
+rather than orphaned. Merging is exact when it undoes a split and approximate
+otherwise, because two joined cubics are generally not one cubic. Dragging a
+handle at a point marked `curve` swings its neighbour to stay opposite, so a
+shared point does not kink; a `corner` point is left alone.
+
+An edge is a line, a Bézier or a circular arc, chosen on the selected edge; a
+point is a corner or smooth, and marking it smooth makes the two edges tangent
+there rather than merely relabelling it. Notches list their type and their
+distance along the seam in millimetres, both editable.
+
+Lengths are integrated from the curves rather than summed off a flattened
+polyline, so a measurement depends on the geometry and not on how finely it was
+sampled — splitting an edge no longer nudges the number. Clicks resolve to a
+true closest point, so a split or a notch lands where the pointer was. Rotate,
+mirror, darts, grain editing and drawing a piece from scratch do not exist yet;
+their controls have been removed rather than shown disabled, and what is missing
+is listed in `DEVELOPMENT.md`.
+
+The History panel reads the command stack directly — newest first, each row
+carrying the command's label, its subject, and how long ago it ran. Entries
+that have been undone stay listed but dimmed, since they are still redoable and
+hiding them makes an undo feel like a delete; making a fresh edit discards that
+branch and the rows go with it. A coalesced burst — a typing run, a drag — is
+one row, because the stack merged it into one entry before the panel ever saw
+it. There is no fabricated "document created" row: with an empty stack the
+panel says so.
+
+Mock data, clearly marked: block library, points of measure and AI suggestions.
+Placeholders: every drawing tool, and the toolbar's Mirror / Rotate / Seam
+allowance / Notch / Grain — all render disabled. No pattern-engineering logic
+(notching, grading, verification) exists yet.
+
+Undo/redo is a real inverse-command stack (`store/historyStore.ts` +
+`store/documentCommands.ts`): every document edit builds a `DocumentCommand`
+that can reverse itself and is executed through the stack, rather than
+mutating `documentStore` directly. Persistence rides on the same path —
+`store/persistence.ts` autosaves to IndexedDB on a debounce and restores on
+load — though there is no file story yet (no download/upload).
 
 **Command palette** — ⌘K / Ctrl+K, or the top-bar trigger. 29 commands in four
 groups (Navigation, Design, Grading, File). The registry in `commands/` is plain

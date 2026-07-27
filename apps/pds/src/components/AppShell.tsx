@@ -1,4 +1,5 @@
-import { useUiStore } from '@/store';
+import { useEffect } from 'react';
+import { hydrateFromAutosave, useHistoryStore, useUiStore } from '@/store';
 import { CommandPalette } from './CommandPalette';
 import { ContextPanel } from './ContextPanel';
 import { InspectorPanel } from './InspectorPanel';
@@ -25,6 +26,13 @@ import { WorkspaceRail } from './WorkspaceRail';
 export const AppShell = () => {
   const contextPanelOpen = useUiStore((s) => s.contextPanelOpen);
   const inspectorOpen = useUiStore((s) => s.inspectorOpen);
+
+  // Runs once on mount: if a prior session left an autosave in IndexedDB, it
+  // replaces the seed document. History is reset either way, since undoing
+  // into whatever was live before hydration makes no sense.
+  useEffect(() => {
+    void hydrateFromAutosave().finally(() => useHistoryStore.getState().reset());
+  }, []);
 
   return (
     <div className="shell">

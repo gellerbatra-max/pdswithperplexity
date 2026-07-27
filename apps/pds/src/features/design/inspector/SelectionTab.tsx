@@ -2,6 +2,7 @@ import { EmptyState, Field, FieldRow, Pair, Toggle, Value } from '@/components/F
 import { PanelSection } from '@/components/PanelSection';
 import { BoundsOps } from '@/geometry';
 import { findPoint, pieceBounds, type PatternPiece } from '@/pattern';
+import { GeometryEdit } from './GeometryEdit';
 
 export const SelectionTab = ({ selected }: { selected: readonly PatternPiece[] }) => {
   if (selected.length === 0) {
@@ -32,6 +33,10 @@ export const SelectionTab = ({ selected }: { selected: readonly PatternPiece[] }
 
   return (
     <>
+      {/* Sits first: when a point or edge is picked, that is what the user is
+          working on, and the piece-level summary is context beneath it. */}
+      <GeometryEdit pieces={selected} />
+
       <PanelSection title="Selection">
         <Field label="Type">
           <Value value={single ? 'Pattern piece' : `${selected.length} pattern pieces`} />

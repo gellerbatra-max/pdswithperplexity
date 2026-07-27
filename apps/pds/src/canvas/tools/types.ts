@@ -1,5 +1,5 @@
 import type { Vec2 } from '@/geometry';
-import type { PatternPiece } from '@/pattern';
+import type { HandleKind, PatternPiece, PieceId, PointId, SegmentId } from '@/pattern';
 import type { SelectionKind, SelectionRef } from '@/store';
 import type { Camera } from '../camera';
 
@@ -35,6 +35,30 @@ export interface ToolContext {
   readonly selectableKinds: readonly SelectionKind[];
   /** Pick tolerance in document units — a constant screen distance at any zoom. */
   readonly pickRadius: number;
+  /**
+   * The current selection. Tools need it for affordances that only exist on
+   * selected geometry — curve handles are drawn for a selected edge and must
+   * only be grabbable there, so the tool has to know what is selected to know
+   * what is draggable.
+   */
+  readonly selection: readonly SelectionRef[];
+}
+
+/**
+ * What a finished drag changed, expressed against the piece as it was when the
+ * drag began. `origin` is captured on pointerdown and every intermediate frame
+ * is derived from it, so the result depends only on where the pointer ended up,
+ * never on how it got there — no accumulated rounding, and a jittery mouse
+ * lands in the same place as a straight one.
+ */
+export interface TranslateEdit {
+  readonly pieceId: PieceId;
+  readonly origin: PatternPiece;
+  readonly delta: Vec2;
+  readonly target:
+    | { readonly kind: 'points'; readonly pointIds: readonly PointId[] }
+    | { readonly kind: 'segment'; readonly segmentId: SegmentId }
+    | { readonly kind: 'piece' };
 }
 
 export interface ToolActions {
@@ -42,6 +66,29 @@ export interface ToolActions {
   readonly clearSelection: () => void;
   readonly panBy: (deltaScreen: Vec2) => void;
   readonly setHover: (ref: SelectionRef | null) => void;
+  /**
+   * Draw a draft piece without touching the document. Pass null to drop it.
+   * This is how a drag shows itself: the document stays untouched until the
+   * gesture commits, so an abandoned drag needs no rollback.
+   */
+  readonly preview: (piece: PatternPiece | null) => void;
+  /** Commit a finished drag as exactly one undoable command. */
+  readonly commitTranslate: (edit: TranslateEdit) => void;
+  /** Commit a finished curve-handle drag. */
+  readonly commitHandle: (edit: HandleEdit) => void;
+  /** Split an edge at `t`, adding an outline point. Selects the new point. */
+  readonly insertPoint: (pieceId: PieceId, segmentId: SegmentId, t: number) => void;
+  /** Place a notch on an edge at `t`. */
+  readonly addNotch: (pieceId: PieceId, segmentId: SegmentId, t: number) => void;
+}
+
+/** A finished handle drag, expressed against the piece the drag started from. */
+export interface HandleEdit {
+  readonly pieceId: PieceId;
+  readonly origin: PatternPiece;
+  readonly segmentId: SegmentId;
+  readonly handle: HandleKind;
+  readonly position: Vec2;
 }
 
 /**
@@ -63,4 +110,6 @@ export interface CanvasTool {
   readonly onPointerDown?: (ctx: ToolContext, actions: ToolActions) => ToolGesture | void;
   /** Called on move when no gesture is active — hover feedback and previews. */
   readonly onPointerMove?: (ctx: ToolContext, actions: ToolActions) => void;
+  /** Double-click, for actions that need a position rather than a drag. */
+  readonly onDoubleClick?: (ctx: ToolContext, actions: ToolActions) => void;
 }

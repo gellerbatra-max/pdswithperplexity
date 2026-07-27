@@ -3,8 +3,10 @@ import { Dxf } from '@/io';
 import {
   createEmptyDocument,
   createSeedDocument,
+  flushAutosave,
   pieceRef,
   useDocumentStore,
+  useHistoryStore,
   useSelectionStore,
   useUiStore,
   useViewportStore,
@@ -276,6 +278,7 @@ const fileCommands: readonly Command[] = [
     keywords: ['blank', 'empty', 'create'],
     run: () => {
       doc().setDocument(createEmptyDocument());
+      useHistoryStore.getState().reset();
       view().resetCamera();
       ui().notify('New empty document');
     },
@@ -289,6 +292,7 @@ const fileCommands: readonly Command[] = [
     keywords: ['load', 'demo', 'shirt', 'seed', 'example'],
     run: () => {
       doc().setDocument(createSeedDocument());
+      useHistoryStore.getState().reset();
       afterRender(() => view().fitToContent());
       ui().notify('Opened SH-2041 Classic Shirt');
     },
@@ -302,9 +306,10 @@ const fileCommands: readonly Command[] = [
     shortcut: '⌘S',
     keywords: ['store', 'persist'],
     isEnabled: () => doc().saveState !== 'saved',
+    // Bypasses the autosave debounce and writes now, so ⌘S means what it says
+    // rather than just flipping the save-state flag.
     run: () => {
-      doc().markSaved();
-      ui().notify('Saved');
+      void flushAutosave().then(() => ui().notify('Saved'));
     },
   },
   {

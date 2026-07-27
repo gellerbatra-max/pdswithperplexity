@@ -21,3 +21,23 @@ export type InternalLineId = string;
 export type MeasurementId = string;
 export type GradeRuleId = string;
 export type SizeId = string;
+
+/**
+ * Monotonic counter behind `createId`. Process-local: ids only need to be
+ * unique within one document, and a document that outlives the process is
+ * re-read from JSON with its ids already baked in.
+ */
+let idCounter = 0;
+
+/**
+ * Mints a fresh, opaque id. The prefix is a readability affordance for anyone
+ * reading a JSON dump — nothing parses it, per the rule above.
+ *
+ * Deliberately not a UUID: these ids are written to every point and segment of
+ * every piece, and the seed document's own ids (`piece-sleeve-p1`) are already
+ * short. A counter keeps exported JSON legible and diffable.
+ */
+export const createId = (prefix: string): string => {
+  idCounter += 1;
+  return `${prefix}-${idCounter.toString(36)}-${Date.now().toString(36)}`;
+};

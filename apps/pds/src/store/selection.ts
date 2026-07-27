@@ -1,4 +1,12 @@
-import { findPiece, findPoint, type PatternDocument, type PieceId, type PointId } from '@/pattern';
+import {
+  findPiece,
+  findPoint,
+  findSegment,
+  type PatternDocument,
+  type PieceId,
+  type PointId,
+  type SegmentId,
+} from '@/pattern';
 
 /**
  * What can be selected.
@@ -14,7 +22,8 @@ import { findPiece, findPoint, type PatternDocument, type PieceId, type PointId 
  */
 export type SelectionRef =
   | { readonly kind: 'piece'; readonly pieceId: PieceId }
-  | { readonly kind: 'point'; readonly pieceId: PieceId; readonly pointId: PointId };
+  | { readonly kind: 'point'; readonly pieceId: PieceId; readonly pointId: PointId }
+  | { readonly kind: 'segment'; readonly pieceId: PieceId; readonly segmentId: SegmentId };
 
 export type SelectionKind = SelectionRef['kind'];
 
@@ -26,9 +35,23 @@ export const pointRef = (pieceId: PieceId, pointId: PointId): SelectionRef => ({
   pointId,
 });
 
+export const segmentRef = (pieceId: PieceId, segmentId: SegmentId): SelectionRef => ({
+  kind: 'segment',
+  pieceId,
+  segmentId,
+});
+
 /** Stable string form, for set membership and React keys. */
-export const selectionKey = (ref: SelectionRef): string =>
-  ref.kind === 'piece' ? `piece:${ref.pieceId}` : `point:${ref.pieceId}:${ref.pointId}`;
+export const selectionKey = (ref: SelectionRef): string => {
+  switch (ref.kind) {
+    case 'piece':
+      return `piece:${ref.pieceId}`;
+    case 'point':
+      return `point:${ref.pieceId}:${ref.pointId}`;
+    case 'segment':
+      return `segment:${ref.pieceId}:${ref.segmentId}`;
+  }
+};
 
 export const sameRef = (a: SelectionRef, b: SelectionRef): boolean =>
   selectionKey(a) === selectionKey(b);
@@ -37,7 +60,14 @@ export const sameRef = (a: SelectionRef, b: SelectionRef): boolean =>
 export const refExists = (document: PatternDocument, ref: SelectionRef): boolean => {
   const piece = findPiece(document, ref.pieceId);
   if (!piece) return false;
-  return ref.kind === 'piece' ? true : findPoint(piece, ref.pointId) !== undefined;
+  switch (ref.kind) {
+    case 'piece':
+      return true;
+    case 'point':
+      return findPoint(piece, ref.pointId) !== undefined;
+    case 'segment':
+      return findSegment(piece, ref.segmentId) !== undefined;
+  }
 };
 
 /** Short human description for the status bar. */
@@ -53,9 +83,17 @@ export const describeSelection = (
 
   const piece = findPiece(document, ref.pieceId);
   if (!piece) return 'No selection';
-  if (ref.kind === 'piece') return `${piece.name} · ${piece.meta.code}`;
 
-  const point = findPoint(piece, ref.pointId);
-  if (!point) return piece.name;
-  return `${piece.name} · ${point.label ?? point.role}`;
+  switch (ref.kind) {
+    case 'piece':
+      return `${piece.name} · ${piece.meta.code}`;
+    case 'point': {
+      const point = findPoint(piece, ref.pointId);
+      return point ? `${piece.name} · ${point.label ?? point.role}` : piece.name;
+    }
+    case 'segment': {
+      const segment = findSegment(piece, ref.segmentId);
+      return segment ? `${piece.name} · ${segment.label ?? 'edge'}` : piece.name;
+    }
+  }
 };

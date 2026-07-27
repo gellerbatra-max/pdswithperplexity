@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { PatternDocument, PatternPiece, PieceId } from '@/pattern';
+import type { PatternDocument } from '@/pattern';
 import { createSeedDocument } from './seedDocument';
 import type { SaveState } from './types';
 
@@ -10,11 +10,22 @@ export interface DocumentState {
   saveState: SaveState;
 
   markSaved: () => void;
+  /**
+   * Full replace for loading or creating a document (new/open/hydrate). Marks
+   * `unsaved` like any other change — even the hydrate-from-autosave case,
+   * where it's already in IndexedDB — so there is exactly one rule for what
+   * `saved` means: "the autosave subscriber has written this exact document".
+   * No caller gets to assert that for free. Resets history yourself: this
+   * store doesn't know about `historyStore`, on purpose.
+   */
   setDocument: (document: PatternDocument) => void;
-  renameDocument: (name: string) => void;
-  addPiece: (piece: PatternPiece) => void;
-  updatePiece: (id: PieceId, patch: Partial<Omit<PatternPiece, 'id'>>) => void;
-  removePiece: (id: PieceId) => void;
+  /**
+   * Full replace with a command's result. Only `historyStore.execute/undo/redo`
+   * should call this — every other mutation should go through a
+   * `DocumentCommand` (see `documentCommands.ts`) so it lands on the undo
+   * stack. Marks the result `unsaved` so the autosave subscriber picks it up.
+   */
+  applyDocument: (document: PatternDocument) => void;
 }
 
 export const useDocumentStore = create<DocumentState>((set) => ({
@@ -23,43 +34,8 @@ export const useDocumentStore = create<DocumentState>((set) => ({
 
   markSaved: () => set({ saveState: 'saved' }),
 
-  setDocument: (document) => set({ document, saveState: 'saved' }),
+  setDocument: (document) => set({ document, saveState: 'unsaved' }),
 
-  renameDocument: (name) =>
-    set((state) => ({
-      document: { ...state.document, name, updatedAt: now() },
-      saveState: 'unsaved',
-    })),
-
-  addPiece: (piece) =>
-    set((state) => ({
-      document: {
-        ...state.document,
-        pieces: [...state.document.pieces, piece],
-        updatedAt: now(),
-      },
-      saveState: 'unsaved',
-    })),
-
-  updatePiece: (id, patch) =>
-    set((state) => ({
-      document: {
-        ...state.document,
-        pieces: state.document.pieces.map((p) => (p.id === id ? { ...p, ...patch } : p)),
-        updatedAt: now(),
-      },
-      saveState: 'unsaved',
-    })),
-
-  // Selection is pruned by the selection store's document subscription.
-  removePiece: (id) =>
-    set((state) => ({
-      document: {
-        ...state.document,
-        pieces: state.document.pieces.filter((p) => p.id !== id),
-        updatedAt: now(),
-      },
-      saveState: 'unsaved' as const,
-    })),
-
+  applyDocument: (document) =>
+    set({ document: { ...document, updatedAt: now() }, saveState: 'unsaved' }),
 }));

@@ -364,6 +364,18 @@
   background: var(--accent);
 }
 
+/* Undone entries are still on the stack and still redoable. They read as
+   pending rather than absent: hollow dot, dimmed text, same row geometry so
+   the timeline spine stays continuous. */
+.history__row[data-undone] {
+  opacity: 0.45;
+}
+
+.history__row[data-undone] .history__dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
 .history__text {
   display: flex;
   flex-direction: column;
@@ -795,6 +807,48 @@
   font-size: var(--text-2xs);
 }
 
+/* Editable fields share the read-only box so the inspector stays visually even;
+   only hover, caret and focus distinguish them. */
+.value--editable:hover {
+  border-color: var(--border-strong);
+}
+
+.value--editable:focus-within {
+  border-color: var(--accent);
+}
+
+.value__input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.value__input:focus {
+  outline: none;
+}
+
+/* The spinners crowd a 84px field and the value is already keyboard-steppable. */
+.value__input[type='number'] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.value__input[type='number']::-webkit-outer-spin-button,
+.value__input[type='number']::-webkit-inner-spin-button {
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.toggle--interactive {
+  cursor: pointer;
+}
+
 .value[data-tone='muted'] {
   color: var(--text-muted);
 }
@@ -1012,6 +1066,107 @@
 .suggestion__actions button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Inspector actions that change geometry, sharing the suggestion button look so
+   the panel keeps one vocabulary for "small bordered thing you can press". */
+.panel-actions {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+.panel-actions button {
+  height: 22px;
+  padding: 0 var(--space-2);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.panel-actions button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.panel-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Segmented choice — edge kind, point role. */
+.choice {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.choice button {
+  padding: 2px var(--space-2);
+  min-height: var(--control-height-sm);
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  cursor: pointer;
+}
+
+.choice button:last-child {
+  border-right: 0;
+}
+
+.choice button:hover {
+  color: var(--text-primary);
+}
+
+.choice button[data-active] {
+  background: var(--accent-dim);
+  color: var(--text-primary);
+}
+
+/* Notches on the selected edge. */
+.notch-list {
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notch-list li {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 3px 0;
+  font-size: var(--text-xs);
+}
+
+.notch-list select {
+  min-width: 0;
+  height: var(--control-height-sm);
+  padding: 0 2px;
+  background: var(--surface-stage);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+}
+
+.notch-list button {
+  padding: 0 var(--space-1);
+  background: none;
+  border: 0;
+  color: var(--text-faint);
+  font-size: var(--text-2xs);
+  cursor: pointer;
+}
+
+.notch-list button:hover {
+  color: var(--danger);
 }
 
 /* =====================================================================

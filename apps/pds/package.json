@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b --pretty"
+    "typecheck": "tsc -b --pretty",
+    "check:offset": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/register.mjs scripts/check-offset.ts",
+    "check:curve": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/register.mjs scripts/check-curve.ts",
+    "check": "npm run check:curve && npm run check:offset && npm run check:roundtrip",
+    "check:roundtrip": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/register.mjs scripts/check-roundtrip.ts"
   },
   "dependencies": {
     "react": "^19.2.0",

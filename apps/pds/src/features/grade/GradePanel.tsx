@@ -53,6 +53,13 @@ export const GradePanel = () => {
     );
   }
 
+  // Grade never offers segments as a selectable kind, but a segment selected in
+  // Design survives a workspace switch — so this panel has to say something
+  // rather than resolve a point id the ref does not carry.
+  if (primary.kind === 'segment') {
+    return <EmptyState>Select a grade point or a piece to inspect its grading.</EmptyState>;
+  }
+
   /* --- Point selected: show its rule and increments --- */
   const point = findPoint(piece, primary.pointId);
   if (!point) return <EmptyState>Selection no longer resolves.</EmptyState>;
