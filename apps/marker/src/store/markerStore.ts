@@ -43,6 +43,8 @@ export interface MarkerState {
   placeFromTray: (trayPieceId: string, position: Point) => void;
   /** Add imported pieces to the tray, leaving placed pieces untouched. */
   addTrayPieces: (pieces: readonly TrayPiece[]) => void;
+  /** Take pieces off the marker and give their quantity back to the tray. */
+  returnToTray: (pieceIds: readonly string[]) => void;
   /** Apply an auto-nest result as one undoable step. */
   applyPlacements: (
     placements: readonly {
@@ -163,6 +165,34 @@ export const useMarkerStore = create<MarkerState>((set) => ({
         const fresh = pieces.filter((piece) => !known.has(piece.id));
         if (fresh.length === 0) return document;
         return { ...document, trayPieces: [...document.trayPieces, ...fresh] };
+      }),
+    ),
+
+  // The inverse of placeFromTray, and likewise one edit: removing a piece and
+  // crediting its quantity back must undo together.
+  returnToTray: (pieceIds) =>
+    set((state) =>
+      edit(state, (document) => {
+        const removing = new Set(pieceIds);
+        const removed = document.pieces.filter((piece) => removing.has(piece.id));
+        if (removed.length === 0) return document;
+
+        const credits = new Map<string, number>();
+        for (const piece of removed) {
+          credits.set(piece.pieceDefId, (credits.get(piece.pieceDefId) ?? 0) + 1);
+        }
+
+        return {
+          ...document,
+          pieces: document.pieces.filter((piece) => !removing.has(piece.id)),
+          trayPieces: document.trayPieces.map((tray) => {
+            const credit = credits.get(tray.id);
+            if (credit === undefined) return tray;
+            // Never below zero: a piece placed before its tray entry existed
+            // would otherwise drive the count negative.
+            return { ...tray, placed: Math.max(0, tray.placed - credit) };
+          }),
+        };
       }),
     ),
 

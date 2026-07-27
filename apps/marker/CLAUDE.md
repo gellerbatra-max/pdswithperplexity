@@ -779,6 +779,41 @@ Wire to export buttons in the right dock Options tab.
 
 ---
 
+### Step 11 — Tools + PWA
+
+The folder structure names `SelectTool` and `ButtSlideTool` and the
+Keys tab lists shortcuts, but no step built them. The PWA requirements
+at the top of this file had no step either. This closes both.
+
+**Part A — tools and shortcuts**
+
+Create: `src/canvas/tools/SelectTool.ts`
+- Marquee drag-select, rubber-band rectangle drawn on the UILayer
+- Shift+click adds to / removes from the selection
+- Alt+click selects the whole bundle
+
+Create: `src/canvas/tools/ButtSlideTool.ts`
+- `L` slides the selected piece left until it collides
+- `U` slides it up until it collides
+- Binary search, bisecting to 0.1 mm
+
+Wire every shortcut in the Keys tab that is not yet implemented.
+
+**Part B — PWA**
+
+- `vite-plugin-pwa` with Workbox, precaching all build assets
+- Web app manifest: name, icons (at least 192×192 and 512×512),
+  `display: standalone`, background and theme colour from the design
+  tokens
+- The app must open in a standalone window and work fully offline
+
+✓ Verify: every keyboard shortcut in the Keys tab works.
+✓ Verify: Lighthouse PWA score ≥ 90.
+✓ Verify: 267+ tests still pass.
+→ Commit: `feat(marker): step 11 — SelectTool, ButtSlideTool, keyboard shortcuts, PWA`
+
+---
+
 ## Replying to Claude After Each Step
 
 After Claude says "Step [N] complete ✓", reply with:

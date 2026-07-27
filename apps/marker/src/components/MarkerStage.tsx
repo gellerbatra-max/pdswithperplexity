@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { MarkerCanvas, MIN_FABRIC_LENGTH } from '@/canvas/MarkerCanvas';
+import { MarkerCanvas } from '@/canvas/MarkerCanvas';
+import { commandForKey } from '@/commands/registry';
 import { importDxfFile } from '@/io/dxfImporter';
-import { markerLength } from '@/marker/selectors';
 import { useMarkerStore } from '@/store/markerStore';
 import { useUiStore } from '@/store/uiStore';
 import { useViewportStore } from '@/store/viewportStore';
@@ -13,9 +13,6 @@ import { useViewportStore } from '@/store/viewportStore';
  * in and routes canvas events back out, so the canvas itself never imports a
  * store and the rest of the shell never touches Konva.
  */
-
-/** Matches the zoom feel of the PDS zoom cluster. */
-const ZOOM_STEP = 1.2;
 
 /** Extensions the drop handler recognises, lower-cased. */
 const DXF_EXTENSION = '.dxf';
@@ -81,11 +78,37 @@ export const MarkerStage = () => {
       onStageResize: (width, height) => useViewportStore.getState().setStageSize(width, height),
       onPieceMoved: (pieceId, position) =>
         useMarkerStore.getState().updatePiece(pieceId, { position }),
-      onPieceSelected: (pieceId, additive) => {
+      onPieceSelected: (pieceId, additive, bundle) => {
         const ui = useUiStore.getState();
-        if (additive) ui.addToSelection(pieceId);
-        else ui.setSelection([pieceId]);
+        if (bundle) {
+          // Alt+click takes the whole bundle: every piece cut from the same
+          // lay, which is how a marker maker thinks about moving work.
+          const marker = useMarkerStore.getState().document;
+          const clicked = marker?.pieces.find((piece) => piece.id === pieceId);
+          if (marker && clicked) {
+            ui.setSelection(
+              marker.pieces.filter((p) => p.bundle === clicked.bundle).map((p) => p.id),
+            );
+            return;
+          }
+        }
+        // Shift toggles, so a piece added by mistake comes off the same way.
+        if (additive) {
+          const current = ui.selection;
+          if (current.includes(pieceId)) {
+            ui.setSelection(current.filter((id) => id !== pieceId));
+          } else {
+            ui.addToSelection(pieceId);
+          }
+          return;
+        }
+        if (!ui.selection.includes(pieceId)) ui.setSelection([pieceId]);
       },
+      onMarqueeSelected: (pieceIds, additive) => {
+        const ui = useUiStore.getState();
+        ui.setSelection(additive ? [...new Set([...ui.selection, ...pieceIds])] : pieceIds);
+      },
+      onClickEmpty: () => useUiStore.getState().clearSelection(),
     });
 
     const render = () =>
@@ -112,19 +135,27 @@ export const MarkerStage = () => {
     const onKeyDown = (event: KeyboardEvent) => {
       // Never steal keys from a field the user is typing in.
       const target = event.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) return;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLSelectElement ||
+        target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
 
-      const { zoom, setZoom, zoomToFit } = useViewportStore.getState();
-      // '=' is the unshifted key most keyboards put '+' on.
-      if (event.key === '+' || event.key === '=') setZoom(zoom * ZOOM_STEP);
-      else if (event.key === '-') setZoom(zoom / ZOOM_STEP);
-      else if (event.key === '0') {
-        const document = useMarkerStore.getState().document;
-        if (!document) return;
-        zoomToFit(Math.max(markerLength(document), MIN_FABRIC_LENGTH), document.fabricWidth);
-      } else if (event.key === 'Escape') useUiStore.getState().clearSelection();
-      else return;
+      const command = commandForKey(event);
+      if (!command) return;
+
+      const marker = useMarkerStore.getState().document;
+      if (!marker) return;
+
+      const selection = useUiStore.getState().selection;
+      // Let the browser keep the key if the command has nothing to act on —
+      // swallowing Delete with no selection would feel broken.
+      if (command.needsSelection && selection.length === 0) return;
+
       event.preventDefault();
+      command.run({ document: marker, selection });
     };
 
     window.addEventListener('keydown', onKeyDown);

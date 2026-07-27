@@ -521,6 +521,79 @@ select {
   margin-top: 0;
 }
 
+/* --- Command palette --------------------------------------------------- */
+
+.palette {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+}
+
+.palette__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.palette__panel {
+  position: relative;
+  width: min(520px, calc(100% - var(--space-6) * 2));
+  margin: 12vh auto 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.palette__input {
+  width: 100%;
+  padding: var(--space-4);
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  background: none;
+  font-size: var(--text-lg);
+  outline: none;
+}
+
+.palette__list {
+  max-height: 48vh;
+  margin: 0;
+  padding: var(--space-2);
+  list-style: none;
+  overflow-y: auto;
+}
+
+.palette__item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.palette__item:hover {
+  background: var(--surface-hover);
+}
+
+.palette__item kbd {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.palette__empty {
+  padding: var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
 /* --- Status bar -------------------------------------------------------- */
 
 .statusbar {

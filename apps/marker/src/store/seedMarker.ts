@@ -30,12 +30,16 @@ const sleeve = (): Point[] => [
 
 const piece = (
   id: string,
+  trayPieceId: string,
   name: string,
   geometry: Point[],
   position: Point,
 ): PlacedPiece => ({
   id,
-  pieceDefId: `def-${id}`,
+  // Must name a real tray entry: returning a piece to the tray credits this
+  // id, and the rotation step is read from the tray piece's lay direction.
+  // An invented id makes both silently do nothing.
+  pieceDefId: trayPieceId,
   name,
   size: 'M',
   bundle: 'B1',
@@ -75,9 +79,9 @@ export const createSeedMarker = (): MarkerDocument => ({
   rotationRule: '90ok',
   cutterBuffer: 0.3,
   pieces: [
-    piece('front', 'Front', rectangle(46, 62), { x: 10, y: 10 }),
-    piece('back', 'Back', rectangle(46, 62), { x: 62, y: 10 }),
-    piece('sleeve', 'Sleeve', sleeve(), { x: 114, y: 14 }),
+    piece('front', 'front-1', 'Front', rectangle(46, 62), { x: 10, y: 10 }),
+    piece('back', 'back-1', 'Back', rectangle(46, 62), { x: 62, y: 10 }),
+    piece('sleeve', 'sleeve-1', 'Sleeve', sleeve(), { x: 114, y: 14 }),
   ],
   // Two bundles of the same three pieces: the first is fully placed, the
   // second is not. That makes the marker PARTIAL with one complete garment,

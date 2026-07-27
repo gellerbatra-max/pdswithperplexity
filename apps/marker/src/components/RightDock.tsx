@@ -1,3 +1,4 @@
+import { COMMANDS } from '@/commands/registry';
 import { downloadText } from '@/io/download';
 import { DXF_FILE_EXTENSION, DXF_MIME_TYPE, exportMarkerDxf } from '@/io/dxfExporter';
 import { HPGL_FILE_EXTENSION, HPGL_MIME_TYPE, exportMarkerHpgl } from '@/io/hpglExporter';
@@ -15,20 +16,18 @@ const TABS: readonly { id: DockTab; label: string }[] = [
   { id: 'keys', label: 'Keys' },
 ];
 
-const SHORTCUTS: readonly { keys: string; action: string }[] = [
-  { keys: 'R / Shift+R', action: 'Rotate CW / CCW' },
-  { keys: 'F / Shift+F', action: 'Flip horizontal / vertical' },
-  { keys: 'Arrows', action: 'Nudge 1 cm' },
-  { keys: 'Shift+Arrows', action: 'Nudge 1 mm' },
-  { keys: 'L / U', action: 'Butt-slide left / up' },
-  { keys: 'Delete', action: 'Return piece to tray' },
-  { keys: 'Shift+click', action: 'Add to selection' },
-  { keys: 'Alt+click', action: 'Select bundle' },
-  { keys: 'Esc', action: 'Deselect all' },
-  { keys: 'Ctrl+Z / Ctrl+Y', action: 'Undo / Redo' },
-  { keys: '+ / - / 0', action: 'Zoom in / out / fit' },
-  { keys: 'Middle-drag', action: 'Pan' },
-  { keys: '⌘K', action: 'Command palette' },
+/**
+ * Gestures have no command — there is no key event to dispatch — so they are
+ * listed separately. Everything else comes from the registry, so the tab
+ * cannot claim a shortcut that does not exist.
+ */
+const GESTURES: readonly { keys: string; label: string }[] = [
+  { keys: 'Click', label: 'Select piece' },
+  { keys: 'Shift+click', label: 'Add to / remove from selection' },
+  { keys: 'Drag on fabric', label: 'Marquee select' },
+  { keys: 'Drag piece', label: 'Move, with collision bounce-back' },
+  { keys: 'Middle-drag', label: 'Pan' },
+  { keys: '⌘K / Ctrl+K', label: 'Command palette' },
 ];
 
 const CUTTER_BUFFERS: readonly CutterBuffer[] = [0, 0.3, 0.5, 1];
@@ -280,10 +279,16 @@ const ExportSection = ({ document }: { document: MarkerDocument }) => {
 const KeysTab = () => (
   <table className="keys">
     <tbody>
-      {SHORTCUTS.map((shortcut) => (
-        <tr key={shortcut.keys}>
-          <th scope="row">{shortcut.keys}</th>
-          <td>{shortcut.action}</td>
+      {COMMANDS.map((command) => (
+        <tr key={command.id}>
+          <th scope="row">{command.keys}</th>
+          <td>{command.label}</td>
+        </tr>
+      ))}
+      {GESTURES.map((gesture) => (
+        <tr key={gesture.keys}>
+          <th scope="row">{gesture.keys}</th>
+          <td>{gesture.label}</td>
         </tr>
       ))}
     </tbody>

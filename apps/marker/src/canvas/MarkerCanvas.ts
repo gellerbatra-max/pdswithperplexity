@@ -4,6 +4,7 @@ import { markerLength } from '@/marker/selectors';
 import { FabricLayer } from './layers/FabricLayer';
 import { PieceLayer } from './layers/PieceLayer';
 import { DragTool, type DragToolContext } from './tools/DragTool';
+import { SelectTool } from './tools/SelectTool';
 import type { MarkerTransform, ViewportSnapshot } from './types';
 
 /**
@@ -26,7 +27,10 @@ export interface MarkerCanvasCallbacks {
   onStageResize: (width: number, height: number) => void;
   /** A drag finished: the piece's resolved, collision-free position. */
   onPieceMoved: (pieceId: string, position: Point) => void;
-  onPieceSelected: (pieceId: string, additive: boolean) => void;
+  /** `additive` is shift-click; `bundle` is alt-click. */
+  onPieceSelected: (pieceId: string, additive: boolean, bundle: boolean) => void;
+  onMarqueeSelected: (pieceIds: string[], additive: boolean) => void;
+  onClickEmpty: () => void;
 }
 
 export class MarkerCanvas {
@@ -40,6 +44,7 @@ export class MarkerCanvas {
   private readonly overlayLayer = new Konva.Layer({ listening: false });
   private readonly uiLayer = new Konva.Layer({ listening: false });
 
+  private readonly selectTool: SelectTool;
   private readonly resizeObserver: ResizeObserver;
   private readonly detachPointerHandlers: () => void;
 
@@ -82,6 +87,13 @@ export class MarkerCanvas {
         onSelect: callbacks.onPieceSelected,
       }),
     );
+
+    this.selectTool = new SelectTool({
+      getContext: () => this.context,
+      onMarquee: callbacks.onMarqueeSelected,
+      onClickEmpty: callbacks.onClickEmpty,
+    });
+    this.selectTool.attach(this.stage, this.uiLayer);
   }
 
   /** Called by React whenever the document, camera or selection changes. */
@@ -117,6 +129,7 @@ export class MarkerCanvas {
   destroy(): void {
     this.resizeObserver.disconnect();
     this.detachPointerHandlers();
+    this.selectTool.destroy();
     this.fabricLayer.destroy();
     this.pieceLayer.destroy();
     this.stage.destroy();

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { restoreOrSeed, startPersistence } from '@/db/persistence';
 import { BottomRibbon } from '@/components/BottomRibbon';
+import { CommandPalette } from '@/components/CommandPalette';
 import { MarkerStage } from '@/components/MarkerStage';
 import { PieceTray } from '@/components/PieceTray';
 import { RightDock } from '@/components/RightDock';
@@ -34,6 +35,7 @@ export const App = () => {
       </div>
       <BottomRibbon />
       <StatusBar />
+      <CommandPalette />
     </div>
   );
 };

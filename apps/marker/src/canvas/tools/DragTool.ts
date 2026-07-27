@@ -146,6 +146,7 @@ const deepestOverlap = (
   moverParts: readonly Point[][],
   position: Point,
   obstacle: Obstacle,
+  buffer: number,
 ): Point | null => {
   let deepest: Point | null = null;
   let deepestDepth = 0;
@@ -153,7 +154,10 @@ const deepestOverlap = (
   for (const part of moverParts) {
     const moved = translate(part, position);
     for (const obstaclePart of obstacle.parts) {
-      const result = satCollision(moved, obstaclePart);
+      // The buffer goes into the test rather than onto the result: scaling the
+      // push afterwards only widens a gap that already exists, so a piece
+      // dropped just short of another stayed inside the buffer.
+      const result = satCollision(moved, obstaclePart, buffer);
       if (!result.collides || !result.mtv) continue;
       const depth = Math.hypot(result.mtv.x, result.mtv.y);
       if (depth > deepestDepth) {
@@ -197,17 +201,11 @@ export const resolveDragPosition = (
     for (const obstacle of obstacles) {
       if (!overlaps(searchBounds, obstacle.bounds)) continue;
 
-      const hit = deepestOverlap(moverParts, position, obstacle);
+      const hit = deepestOverlap(moverParts, position, obstacle, buffer);
       if (!hit) continue;
+      if (hit.x === 0 && hit.y === 0) continue;
 
-      const depth = Math.hypot(hit.x, hit.y);
-      if (depth === 0) continue;
-
-      // Push clear of the overlap, then the buffer further along the same
-      // axis. Offsetting the polygon itself would be exact, but that needs a
-      // real inset/outset and this is a drag loop.
-      const scale = (depth + buffer) / depth;
-      position = { x: position.x + hit.x * scale, y: position.y + hit.y * scale };
+      position = { x: position.x + hit.x, y: position.y + hit.y };
       pushed = true;
       break;
     }
@@ -228,8 +226,8 @@ export interface DragToolCallbacks {
   /** Read at drag time, so the tool always sees the current document. */
   readonly getContext: () => DragToolContext | null;
   readonly onCommit: (pieceId: string, position: Point) => void;
-  /** Additive when the shift key is held, matching the shortcut table. */
-  readonly onSelect: (pieceId: string, additive: boolean) => void;
+  /** Additive on shift, whole-bundle on alt, matching the shortcut table. */
+  readonly onSelect: (pieceId: string, additive: boolean, bundle: boolean) => void;
 }
 
 export class DragTool {
@@ -240,7 +238,8 @@ export class DragTool {
     group.draggable(true);
 
     group.on('mousedown touchstart', (event) => {
-      this.callbacks.onSelect(pieceId, event.evt.shiftKey === true);
+      const mouse = event.evt instanceof MouseEvent ? event.evt : null;
+      this.callbacks.onSelect(pieceId, mouse?.shiftKey === true, mouse?.altKey === true);
     });
 
     // A cached group cannot repaint while it moves.

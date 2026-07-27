@@ -67,12 +67,20 @@ const centroidOf = (polygon: readonly Point[]): Point => {
 };
 
 /**
- * Test two polygons in marker space (cm).
+ * Test two polygons in marker space (cm), optionally requiring a gap.
  *
- * When they overlap, `mtv` is the shortest translation that moves `a` clear
+ * `minGap` inflates the test by that much on every axis, so a pair merely
+ * closer than the cutter buffer reports as colliding and the `mtv` pushes them
+ * to exactly the buffer apart. With the default of zero this is plain SAT.
+ *
+ * When they collide, `mtv` is the shortest translation that moves `a` clear
  * of `b` — apply it to `a` directly, no inversion needed.
  */
-export const satCollision = (a: readonly Point[], b: readonly Point[]): CollisionResult => {
+export const satCollision = (
+  a: readonly Point[],
+  b: readonly Point[],
+  minGap = 0,
+): CollisionResult => {
   if (a.length < 3 || b.length < 3) return NO_COLLISION;
 
   let smallestOverlap = Number.POSITIVE_INFINITY;
@@ -82,7 +90,9 @@ export const satCollision = (a: readonly Point[], b: readonly Point[]): Collisio
     const projectionA = project(a, axis);
     const projectionB = project(b, axis);
     const overlap =
-      Math.min(projectionA.max, projectionB.max) - Math.max(projectionA.min, projectionB.min);
+      Math.min(projectionA.max, projectionB.max) -
+      Math.max(projectionA.min, projectionB.min) +
+      minGap;
 
     // A gap on any axis proves separation — stop immediately. Touching exactly
     // (overlap 0) is not a collision; pieces laid edge to edge are normal.
