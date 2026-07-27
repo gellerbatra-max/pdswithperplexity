@@ -1,3 +1,7 @@
+import { downloadText } from '@/io/download';
+import { DXF_FILE_EXTENSION, DXF_MIME_TYPE, exportMarkerDxf } from '@/io/dxfExporter';
+import { HPGL_FILE_EXTENSION, HPGL_MIME_TYPE, exportMarkerHpgl } from '@/io/hpglExporter';
+import { MARKER_MIME_TYPE, markerFileName, serializeMarker } from '@/io/markerJson';
 import { markerStatus } from '@/marker/selectors';
 import type { CutterBuffer, MarkerDocument, RotationRule } from '@/marker/schema';
 import { useMarkerStore } from '@/store/markerStore';
@@ -204,10 +208,71 @@ const OptionsTab = ({ document }: { document: MarkerDocument }) => {
       </label>
 
       {/*
-        TODO(step-10): ply direction belongs here, and the DXF/HPGL export
-        buttons. Ply direction has no field on MarkerDocument yet, so there is
-        nothing to bind a control to.
+        TODO(ply-direction): belongs in this tab, but MarkerDocument has no
+        field for it, so there is nothing to bind a control to.
       */}
+
+      <ExportSection document={document} />
+    </>
+  );
+};
+
+const ExportSection = ({ document }: { document: MarkerDocument }) => {
+  const setStatus = useUiStore((state) => state.setStatus);
+
+  // The marker's own name, minus its .marker.json suffix.
+  const base = markerFileName(document).replace(/\.marker\.json$/, '');
+  const empty = document.pieces.length === 0;
+
+  const save = (extension: string, mimeType: string, build: () => string, label: string) => {
+    try {
+      downloadText(`${base}${extension}`, build(), mimeType);
+      setStatus('ok', `Exported ${base}${extension}`);
+    } catch (error) {
+      setStatus('error', `${label} export failed: ${error instanceof Error ? error.message : ''}`);
+    }
+  };
+
+  return (
+    <>
+      <div className="dock__row dock__row--header">
+        <span>Export</span>
+      </div>
+
+      {empty ? <p className="dock__empty">Place a piece before exporting.</p> : null}
+
+      <div className="dock__actions">
+        <button
+          type="button"
+          className="topbar__button"
+          disabled={empty}
+          title="AAMA DXF (R12) for AccuMark and other cutting-room systems"
+          onClick={() => save(DXF_FILE_EXTENSION, DXF_MIME_TYPE, () => exportMarkerDxf(document), 'DXF')}
+        >
+          DXF
+        </button>
+        <button
+          type="button"
+          className="topbar__button"
+          disabled={empty}
+          title="HPGL cut data, 1 plotter unit = 0.025 mm"
+          onClick={() =>
+            save(HPGL_FILE_EXTENSION, HPGL_MIME_TYPE, () => exportMarkerHpgl(document), 'HPGL')
+          }
+        >
+          HPGL
+        </button>
+        <button
+          type="button"
+          className="topbar__button"
+          title="Native format — reopens with everything intact"
+          onClick={() =>
+            save('.marker.json', MARKER_MIME_TYPE, () => serializeMarker(document), 'Marker')
+          }
+        >
+          .marker.json
+        </button>
+      </div>
     </>
   );
 };
