@@ -7,9 +7,10 @@
  * whitespace- or comma-separated rows of `rule size dx dy`, skips anything it
  * cannot make sense of, and reports what it skipped.
  *
- * Nothing consumes these yet. MarkerDocument has no field for grade rules, so
- * the importer returns the table alongside the pieces and the caller decides.
- * Grading a marker is a different feature from making one.
+ * TODO(grading): nothing consumes these. MarkerDocument has no field for grade
+ * rules, and adding one is a schema change nobody needs yet, so the importer
+ * returns the table alongside the pieces and the caller discards it. Grading a
+ * marker is a different feature from making one.
  *
  * Pure: text in, table out.
  */

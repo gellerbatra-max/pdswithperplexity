@@ -111,8 +111,17 @@ select {
   color: var(--text-muted);
 }
 
-.topbar__save[data-state='unsaved'] {
+.topbar__save[data-state='unsaved'],
+.topbar__save[data-state='saving'] {
   color: var(--warning);
+}
+
+.topbar__save[data-state='saved'] {
+  color: var(--success);
+}
+
+.topbar__save[data-state='error'] {
+  color: var(--danger);
 }
 
 /* --- Panels ------------------------------------------------------------ */

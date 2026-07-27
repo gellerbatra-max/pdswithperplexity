@@ -15,8 +15,12 @@ import { parseRul, type RulTable } from './rul';
 
 export interface ImportedPiece extends TrayPiece {
   /**
-   * Convex parts of `geometry`, for the SAT narrow phase. Derived data, so it
-   * is carried on the import result rather than stored on the document.
+   * Convex parts of `geometry`, for the SAT narrow phase.
+   *
+   * Derived, and deliberately not persisted: a document reloaded from IndexedDB
+   * gets its parts back from `convexPartsOf`, which recomputes and memoises.
+   * Storing them would mean a schema field that can fall out of step with the
+   * outline it describes.
    */
   readonly convexParts: Point[][];
 }
@@ -161,8 +165,10 @@ export const importDxf = (dxfText: string, rulText?: string): DxfImportResult =>
       continue;
     }
 
-    // The largest closed loop is the boundary; smaller ones are notches,
-    // drill holes and internal marks, which this step does not carry.
+    // The largest closed loop is the boundary.
+    // TODO(internal-marks): the smaller loops are notches, drill holes and
+    // grain lines. They are dropped because MarkerDocument has nowhere to put
+    // them, but a cutter needs them.
     let boundary = closed[0];
     if (!boundary) continue;
     for (const path of closed) {

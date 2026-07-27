@@ -1,20 +1,27 @@
 import { useEffect } from 'react';
+import { restoreOrSeed, startPersistence } from '@/db/persistence';
 import { BottomRibbon } from '@/components/BottomRibbon';
 import { MarkerStage } from '@/components/MarkerStage';
 import { PieceTray } from '@/components/PieceTray';
 import { RightDock } from '@/components/RightDock';
 import { StatusBar } from '@/components/StatusBar';
 import { TopBar } from '@/components/TopBar';
-import { useMarkerStore } from '@/store/markerStore';
-import { createSeedMarker } from '@/store/seedMarker';
+import { useUiStore } from '@/store/uiStore';
 
 /** Layout only — every panel reads what it needs from the stores itself. */
 export const App = () => {
   useEffect(() => {
-    // TODO(step-8): open the last marker from IndexedDB instead of seeding.
-    if (!useMarkerStore.getState().document) {
-      useMarkerStore.getState().loadMarker(createSeedMarker());
-    }
+    // Start the subscription before restoring, so a seeded marker is saved but
+    // a restored one is not written straight back.
+    const persistence = startPersistence();
+
+    void restoreOrSeed(undefined, persistence).then((outcome) => {
+      if (outcome.restored) {
+        useUiStore.getState().setStatus('ok', `Reopened ${outcome.marker.name}`);
+      }
+    });
+
+    return persistence.stop;
   }, []);
 
   return (
