@@ -36,7 +36,7 @@ modify it. Study its patterns and follow them.
 | vite | 7.3.6 | 7.1.0 has high-severity CVEs (path traversal, server.fs.deny bypass); 7.3.6 is the fixed resolved version |
 | typescript | 5.9.3 | 5.9.0 was never published stable; 5.9.3 is the first stable 5.9.x |
 | @vitejs/plugin-react | 5.0.0 | per spec |
-| vitest | 3.2.4 | devDependency, add in Step 1 |
+| vitest | 3.2.7 | devDependency, add in Step 1. Below 3.2.6 is GHSA-5xrq-8626-4rwp (critical), which fails the Step 1 audit gate |
 
 All packages in the `dependencies` block must be pinned exact — no `^` or `~`.
 `devDependencies` may use `~` for patch-level flexibility only.
@@ -565,9 +565,16 @@ After ALL verify checks for a step pass, run this exact command
 before saying "Step [N] complete ✓":
 
 ```bash
-git add apps/marker
+git add apps/marker package-lock.json
 git commit -m "feat(marker): step [N] — [short description]"
 ```
+
+`package-lock.json` lives at the repo root but records marker's
+dependency tree — stage it with every step, or a clean clone
+cannot build.
+
+Work each step on a branch (`feat/marker-step-N-...`). Once I
+confirm the step, fast-forward `main` onto it and delete the branch.
 
 Commit message format: `feat(marker): step N — description`
 Examples:
