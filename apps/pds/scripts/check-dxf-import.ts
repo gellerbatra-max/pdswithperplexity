@@ -26,10 +26,13 @@ import type { PatternDocument } from '../src/pattern/index.ts';
  * back into `import.ts` — so a bug shared between the importer and its test
  * would still be caught.
  *
- * This is a regression set of *one* real file. That is a start, not the
- * "small representative set" real production import needs — see
- * DEVELOPMENT.md for what a second file (ideally one that actually uses
- * notches, grain lines or curves) would unlock.
+ * Two real files are covered — fixture 1 below, then `tshirt-demo-aama.dxf`
+ * from § 14 on. Two is still not the "small representative set" real
+ * production import needs, but it is past the point where a single writer's
+ * habits look like the format: the second file immediately exposed a SEQEND
+ * desync (§ 21) that fixture 1 structurally could not, and contradicted the
+ * layer table in three places. See DEVELOPMENT.md for what a third file —
+ * ideally one with an actual notch — would unlock.
  */
 
 let failures = 0;
@@ -349,6 +352,374 @@ check(
     plan.blockers.some((b) => b.code === 'unverified-layer-map'),
     JSON.stringify(plan.blockers),
   );
+  check(
+    'describeImportPlan reports the bindings real files actively contradict',
+    plan.blockers.some(
+      (b) =>
+        b.code === 'layer-table-contradicted' &&
+        b.message.includes('grade-reference') &&
+        b.message.includes('sew-line') &&
+        b.message.includes('left as it is'),
+    ),
+    JSON.stringify(plan.blockers.find((b) => b.code === 'layer-table-contradicted')?.message),
+  );
+}
+
+/* ===========================================================================
+ * Fixture 2 — TSHIRT-DEMO.aama, a second real production file
+ *
+ * Deliberately *not* another boundary-only export. It differs from fixture 1
+ * in every way that matters to the parser:
+ *
+ *   - it declares itself ASTM D6673-04 conformant, from a different writer
+ *   - it has no $INSUNITS, and states its unit as a `Units:METRIC` text field
+ *   - it carries self-labelled `Key:Value` metadata at style and piece scope
+ *   - it puts LINE entities on layers 5 and 7, and TEXT on layers 1 and 15
+ *   - its SEQEND entities carry trailing group codes (which fixture 1's do not)
+ *   - it is a marker: the same piece recurs once per size
+ *
+ * Everything expected below is again derived from the file's own raw group
+ * codes, transcribed by hand into `TSHIRT_RAW`, not by calling the importer.
+ * Every block's base point and every INSERT is (0,0) and the unit factor is
+ * 1mm, all verified directly against the file, so the expected point for a
+ * raw vertex is exactly (x, -y) — the Y flip and nothing else.
+ * ========================================================================= */
+
+const TSHIRT_PATH = fileURLToPath(new URL('./fixtures/dxf/tshirt-demo-aama.dxf', import.meta.url));
+const tshirt = readFileSync(TSHIRT_PATH, 'utf8');
+
+/** Raw VERTEX coordinates (group 10/20), in file order, for two blocks. */
+const TSHIRT_RAW: Readonly<Record<string, ReadonlyArray<readonly [number, number]>>> = {
+  'M0005_Neck-band': [
+    [2077.8, 62.8], [1463.4, 62.8], [1463.4, 27.5], [2077.8, 27.5],
+  ],
+  'M0003_Sleeve': [
+    [2183.4, 343.7], [2193.2, 295.7], [2214.8, 247.7], [2248.1, 199.7], [2275.5, 165.1],
+    [2293.2, 151.7], [2401.0, 159.4], [2406.8, 228.5], [2410.8, 343.7], [2406.8, 458.9],
+    [2401.0, 528.0], [2293.2, 535.7], [2275.5, 522.3], [2248.1, 487.7], [2214.8, 439.7],
+    [2193.2, 391.7],
+  ],
+};
+
+/** Raw LINE endpoints (groups 10/20 → 11/21) with their layer, same two blocks. */
+const TSHIRT_RAW_LINES: Readonly<
+  Record<string, ReadonlyArray<readonly [string, number, number, number, number]>>
+> = {
+  'M0005_Neck-band': [
+    ['5', 1463.4, 45.15, 2077.8, 45.15],
+    ['7', 1555.56, 45.15, 1985.64, 45.15],
+  ],
+  'M0003_Sleeve': [
+    ['5', 2183.4, 343.7, 2410.8, 343.7],
+    ['7', 2217.51, 343.7, 2376.69, 343.7],
+  ],
+};
+
+/** Block names in INSERT order — the order pieces must come out in. */
+const TSHIRT_BLOCKS = [
+  'M0001_Front', 'M0002_Back', 'M0003_Sleeve', 'M0004_Sleeve', 'M0005_Neck-band',
+  'M0006_Front', 'M0007_Back', 'M0008_Sleeve', 'M0009_Sleeve', 'M0010_Neck-band',
+  'M0011_Front', 'M0012_Back', 'M0013_Sleeve', 'M0014_Sleeve', 'M0015_Neck-band',
+  'M0016_Front', 'M0017_Back', 'M0018_Sleeve', 'M0019_Sleeve', 'M0020_Neck-band',
+];
+
+/** Raw VERTEX count per block, straight from the file. */
+const TSHIRT_VERTEX_COUNTS: Readonly<Record<string, number>> = {
+  Front: 26, Back: 24, Sleeve: 16, 'Neck band': 4,
+};
+
+const tshirtResult = importDxfWithDiagnostics(tshirt, { flavour: 'aama', assumeUnit: 'mm' });
+const tshirtDoc = tshirtResult.document;
+const tshirtIssues = tshirtResult.issues;
+const issueCodes = new Set(tshirtIssues.map((i) => i.code));
+
+/* --- 14. The second real file parses into the pieces it actually contains -- */
+
+check('fixture 2 imports every placed block as a piece', tshirtDoc.pieces.length === 20, `${tshirtDoc.pieces.length} pieces`);
+check(
+  'fixture 2 pieces come out in INSERT order, keyed by block name in meta.code',
+  tshirtDoc.pieces.map((p) => p.meta.code).join('|') === TSHIRT_BLOCKS.join('|'),
+  tshirtDoc.pieces.map((p) => p.meta.code).join(', '),
+);
+check(
+  'fixture 2 piece names come from the file\'s own "Piece Name" field, not the block name',
+  tshirtDoc.pieces.every((p) => p.name !== p.meta.code) &&
+    tshirtDoc.pieces[0]!.name === 'Front' &&
+    tshirtDoc.pieces[4]!.name === 'Neck band',
+  `${tshirtDoc.pieces[0]!.name} / ${tshirtDoc.pieces[4]!.name}`,
+);
+
+/* --- 15. Geometry, verified against the hand-transcribed raw vertices ------ */
+
+for (const [blockName, raw] of Object.entries(TSHIRT_RAW)) {
+  const piece = tshirtDoc.pieces.find((p) => p.meta.code === blockName)!;
+  const corners = piece.points.filter((pt) => pt.role === 'corner');
+
+  check(`"${blockName}": corner count matches the raw VERTEX count`, corners.length === raw.length, `${corners.length} vs ${raw.length}`);
+
+  // Base point and INSERT are both (0,0) and the unit factor is 1mm, so the
+  // whole transform is the Y flip. Anything else is a bug.
+  const mismatches = raw.filter((expected, i) => {
+    const actual = corners[i]?.position;
+    return !actual || Math.abs(actual.x - expected[0]) > EPS || Math.abs(actual.y - -expected[1]) > EPS;
+  });
+  check(`"${blockName}": every corner is the raw vertex with Y negated`, mismatches.length === 0, `${mismatches.length} mismatch(es)`);
+
+  check(
+    `"${blockName}": the boundary covers the corners only, not the construction points`,
+    piece.boundary.length === corners.length && piece.segments.length === corners.length,
+    `boundary ${piece.boundary.length}, segments ${piece.segments.length}, corners ${corners.length}`,
+  );
+  check(
+    `"${blockName}": every boundary segment is a straight line`,
+    piece.segments.every((s) => s.geometry.kind === 'line'),
+    'ok',
+  );
+}
+
+for (const piece of tshirtDoc.pieces) {
+  const expected = TSHIRT_VERTEX_COUNTS[piece.name];
+  if (expected === undefined) {
+    check(`unexpected piece name "${piece.name}"`, false, 'not in the transcribed table');
+    continue;
+  }
+  check(
+    `"${piece.meta.code}" (${piece.name}): corner count matches the raw VERTEX count`,
+    piece.points.filter((pt) => pt.role === 'corner').length === expected,
+    `${piece.points.filter((pt) => pt.role === 'corner').length} vs ${expected}`,
+  );
+}
+
+/* --- 16. Units read from the file's own text field, not assumed ------------ */
+
+check(
+  'fixture 2 has no $INSUNITS and says so',
+  tshirtIssues.some((i) => i.code === 'units-read' && i.message.includes('no $INSUNITS')),
+  'ok',
+);
+check(
+  'fixture 2 units come from its "Units:METRIC" field rather than the assumed fallback',
+  tshirtIssues.some((i) => i.code === 'units-read' && i.message.includes('Units:METRIC')) &&
+    !issueCodes.has('unit-assumed'),
+  'ok',
+);
+{
+  // METRIC ⇒ 1mm per unit ⇒ coordinates unscaled. Passing a *different*
+  // assumeUnit must not change the result: the file's own statement wins.
+  const asInches = importDxfWithDiagnostics(tshirt, { flavour: 'aama', assumeUnit: 'in' });
+  check(
+    'the file\'s declared unit beats options.assumeUnit',
+    pieceShape(asInches.document) === pieceShape(tshirtDoc),
+    'ok',
+  );
+}
+
+/* --- 17. Metadata genuinely read, and honestly scoped ---------------------- */
+
+check(
+  'the document takes its name and style code from the file\'s "Style Name"',
+  tshirtDoc.name === 'TSHIRT-DEMO' && tshirtDoc.style.code === 'TSHIRT-DEMO',
+  `${tshirtDoc.name} / ${tshirtDoc.style.code}`,
+);
+check(
+  'style-level fields are reported as read from text, not presented as guaranteed',
+  tshirtIssues.some(
+    (i) =>
+      i.code === 'metadata-read-from-text' &&
+      i.message.includes('D 6673-04') &&
+      i.message.includes('writer convention'),
+  ),
+  'ok',
+);
+check(
+  'cut quantity is read from the file rather than defaulted',
+  tshirtDoc.pieces.every((p) => p.meta.quantity === 1) &&
+    tshirtIssues.some((i) => i.code === 'metadata-not-in-source' && i.message.includes('Cut quantity was read')),
+  'ok',
+);
+check(
+  'the ambiguous "Quantity:1,0" is reported rather than silently interpreted',
+  tshirtIssues.some((i) => i.code === 'quantity-field-ambiguous' && i.message.includes('decimal comma')),
+  'ok',
+);
+check(
+  'fabric and category are still flagged as having no source',
+  tshirtDoc.pieces.every((p) => p.meta.fabric === '' && p.meta.category === 'shell') &&
+    tshirtIssues.some((i) => i.code === 'metadata-not-in-source' && i.message.includes('Fabric and category')),
+  'ok',
+);
+check(
+  'each piece records the size name the file gave it',
+  tshirtDoc.pieces[0]!.meta.description === 'Size Name: S' &&
+    tshirtDoc.pieces[19]!.meta.description === 'Size Name: L',
+  `${tshirtDoc.pieces[0]!.meta.description} / ${tshirtDoc.pieces[19]!.meta.description}`,
+);
+check(
+  'a "Rotation:180" text field is reported as not applied, not silently obeyed',
+  tshirtIssues.some((i) => i.code === 'rotation-not-applied' && i.message.includes('nothing was rotated')),
+  'ok',
+);
+
+/* --- 18. LINE entities kept as geometry, with no meaning claimed ----------- */
+
+for (const [blockName, rawLines] of Object.entries(TSHIRT_RAW_LINES)) {
+  const piece = tshirtDoc.pieces.find((p) => p.meta.code === blockName)!;
+  const byId = new Map(piece.points.map((pt) => [pt.id, pt.position]));
+
+  check(`"${blockName}": both LINE entities survive as internal lines`, piece.internalLines.length === rawLines.length, `${piece.internalLines.length} vs ${rawLines.length}`);
+  check(
+    `"${blockName}": internal lines are construction geometry, drawn and never cut`,
+    piece.internalLines.every((l) => l.role === 'construction' && !l.cut && !l.closed),
+    'ok',
+  );
+  check(
+    `"${blockName}": no grain line is claimed from an unverified layer number`,
+    piece.grainLine === undefined,
+    String(piece.grainLine),
+  );
+
+  const wrong = rawLines.filter((raw, i) => {
+    const line = piece.internalLines[i];
+    if (!line || line.points.length !== 2) return true;
+    const a = byId.get(line.points[0]!);
+    const b = byId.get(line.points[1]!);
+    if (!a || !b) return true;
+    return (
+      Math.abs(a.x - raw[1]) > EPS || Math.abs(a.y - -raw[2]) > EPS ||
+      Math.abs(b.x - raw[3]) > EPS || Math.abs(b.y - -raw[4]) > EPS
+    );
+  });
+  check(`"${blockName}": internal-line endpoints match the raw LINE group codes with Y negated`, wrong.length === 0, `${wrong.length} wrong`);
+  check(
+    `"${blockName}": internal-line endpoints are construction points, off the outline`,
+    piece.internalLines.every((l) =>
+      l.points.every((id) => piece.points.find((pt) => pt.id === id)?.role === 'construction'),
+    ),
+    'ok',
+  );
+}
+
+/* --- 19. Layer reporting distinguishes supported / unsupported / conflicting */
+
+{
+  const usage = tshirtIssues.find((i) => i.code === 'layer-usage');
+  check('a layer-usage line reports every layer the file uses', usage !== undefined, usage?.message ?? 'missing');
+  check(
+    'layer usage names the outline, construction and skipped treatments separately',
+    usage !== undefined &&
+      usage.message.includes('POLYLINE×20 on layer "1" (imported as the piece outline)') &&
+      usage.message.includes('LINE×20 on layer "7" (imported as construction geometry, with no meaning claimed)') &&
+      usage.message.includes('TEXT×20 on layer "15" (not imported)'),
+    usage?.message ?? 'missing',
+  );
+
+  const conflicts = tshirtIssues.filter((i) => i.code === 'layer-entity-conflict');
+  const conflictLayers = conflicts.map((c) => c.message.match(/^Layer "([^"]+)"/)?.[1]).sort();
+  check(
+    'the layer table\'s disagreements with this real file are reported, one per layer/entity pair',
+    JSON.stringify(conflictLayers) === JSON.stringify(['1', '15', '5']),
+    JSON.stringify(conflictLayers),
+  );
+  check(
+    'layer 5 is flagged: the table says POINT grade-reference, the file puts LINE there',
+    conflicts.some((c) => c.message.includes('Layer "5"') && c.message.includes('grade-reference') && c.message.includes('puts LINE there')),
+    'ok',
+  );
+  check(
+    'layer 15 is flagged: the table says POLYLINE sew-line, the file puts TEXT there',
+    conflicts.some((c) => c.message.includes('Layer "15"') && c.message.includes('sew-line') && c.message.includes('puts TEXT there')),
+    'ok',
+  );
+  check(
+    'layer 7 is NOT flagged — the table already expects LINE there, and the file agrees',
+    !conflicts.some((c) => c.message.startsWith('Layer "7"')),
+    'ok',
+  );
+  check(
+    'a conflict never rewrites the layer table to match the file',
+    conflicts.every((c) => c.message.includes('was not changed to match this file')),
+    'ok',
+  );
+  check('every layer this file uses has some binding in the table', !issueCodes.has('unmapped-layer'), 'ok');
+}
+
+/* --- 20. A marker's repeated sizes are stated, not silently flattened ------ */
+
+{
+  const flat = tshirtIssues.find((i) => i.code === 'sizes-imported-flat');
+  check('repeated pieces across sizes are reported', flat !== undefined && flat.severity === 'warning', flat?.message ?? 'missing');
+  check(
+    'the report names the sizes seen and refuses to infer a graded size range',
+    flat !== undefined && flat.message.includes('S, M, L') && flat.message.includes('not* assembled into a graded size range'),
+    flat?.message ?? 'missing',
+  );
+  check(
+    'no grade rules were invented from the repeated outlines',
+    tshirtDoc.gradeRules.length === 0 && tshirtDoc.sizeRange.sizes.length === 1,
+    `${tshirtDoc.gradeRules.length} rules, ${tshirtDoc.sizeRange.sizes.length} size(s)`,
+  );
+}
+
+/* --- 21. The SEQEND desync this file exposed must not come back ------------ */
+
+{
+  // Fixture 2's SEQEND and ENDBLK entities carry a trailing `8` (layer) group
+  // that fixture 1's do not. Consuming only their `0` marker left that field
+  // in the stream, where the block reader took it for an entity marker and
+  // reported a skipped entity named "1". Verified by reverting the fix: this
+  // section fails, and only this section — the stray token was swallowed by
+  // the bogus skip rather than shifting everything after it, so the geometry
+  // survived. That is what made it a *quiet* desync worth a named guard: it
+  // produced a confusing warning and no visible damage, which is exactly the
+  // kind of thing that gets dismissed as noise.
+  const stray = tshirtIssues.filter((i) => i.code === 'unsupported-entity');
+  check(
+    'no entity is skipped in a file whose every entity kind is handled',
+    stray.length === 0,
+    stray.map((s) => s.message).join(' | ') || 'none',
+  );
+  check(
+    'no diagnostic names a bare group code as if it were an entity',
+    !tshirtIssues.some((i) => i.message.includes('stray group') || /entity "\d+"/.test(i.message)),
+    'ok',
+  );
+  check(
+    'the entities following a SEQEND are still read (they were lost by the desync)',
+    tshirtDoc.pieces.every((p) => p.internalLines.length === 2),
+    `internal-line counts: ${[...new Set(tshirtDoc.pieces.map((p) => p.internalLines.length))].join(',')}`,
+  );
+}
+
+/* --- 22. Determinism and round-trip, for the second file too --------------- */
+
+{
+  const again = importDxfWithDiagnostics(tshirt, { flavour: 'aama', assumeUnit: 'mm' });
+  check('fixture 2 re-imports deterministically (ids aside)', pieceShape(again.document) === pieceShape(tshirtDoc), 'ok');
+  // Diagnostics carry the piece id they came from, and a fresh import mints
+  // fresh ids — so this compares severity/code/message, the parts that are
+  // supposed to be reproducible, exactly as `pieceShape` does for geometry.
+  const issueShape = (list: readonly { severity: string; code: string; message: string }[]): string =>
+    JSON.stringify(list.map((i) => [i.severity, i.code, i.message]));
+  check(
+    'fixture 2 produces the same diagnostics every time (piece ids aside)',
+    issueShape(again.issues) === issueShape(tshirtIssues),
+    'ok',
+  );
+
+  const roundTripped = jsonAdapter.deserialize!(jsonAdapter.serialize!(tshirtDoc));
+  check(
+    'fixture 2 round-trips exactly through the native JSON format, construction lines included',
+    JSON.stringify(roundTripped) === JSON.stringify(tshirtDoc),
+    'ok',
+  );
+
+  let thrown: unknown = null;
+  try {
+    importDxf(tshirt, { flavour: 'aama', assumeUnit: 'mm' });
+  } catch (error) {
+    thrown = error;
+  }
+  check('importDxf does not throw on fixture 2 (warnings only, no errors)', thrown === null, String(thrown));
 }
 
 console.log(failures === 0 ? '\nAll DXF import checks passed.' : `\n${failures} DXF import check(s) FAILED.`);

@@ -37,7 +37,7 @@ intended tool sets, because there the list is the only statement of coverage.
 | Point role (smooth / corner) | Real — inspector control, enforced on handles, shown on canvas |
 | Numeric point + edge editing | Real — inspector writes through commands |
 | Grading | Real — named sizes, a shared grade-rule table, per-point propagation, full rule/assignment CRUD as undoable commands, real diagnostics. See below; a real *solver* (construction-line-aware, seam-length-preserving) is still future work |
-| DXF import | Real for what one production file proves — boundary polylines via BLOCK/INSERT, straight-line geometry, unit conversion. Notches, grain, internal lines, curves: not read yet, warned and skipped. Not reachable from the UI (no file picker) |
+| DXF import | Real for what two production files prove — boundary polylines via BLOCK/INSERT, straight-line geometry, units from `$INSUNITS` or a `Units:` field, self-labelled `Key:Value` metadata, `LINE` kept as unclaimed construction geometry. Notches, drill holes, curves: not read, warned and skipped. Grain deliberately *not* claimed. Not reachable from the UI (no file picker) |
 | DXF export | **Not implemented** — throws |
 | Undo/redo | Real — inverse-command stack (`historyStore.ts` + `documentCommands.ts`) |
 | Persistence | Real, partially — autosave to IndexedDB; **no file story yet** (no download/upload) |
@@ -135,16 +135,17 @@ overrides work. `npm run check:offset` verifies it against hand-derivable
 answers — squares, an L, a slot narrower than twice the offset, and a circle.
 
 `npm run check` runs all five self-check suites — curve, offset, round-trip,
-grading and DXF import, 255 assertions. They are not a test framework and are
+grading and DXF import, 325 assertions. They are not a test framework and are
 not an argument for adding one; they exist because this is the code whose
 mistakes look plausible on screen and only show up in someone's cut file.
 `scripts/` carries a small Node resolver hook so the checks can import the
 app's aliased, extensionless source without a bundler or any dependency.
-`check-dxf-import.ts` is the one suite that reads an external file
-(`scripts/fixtures/dxf/`) rather than building its fixture inline — a real
-production DXF, not a synthetic one, because parser correctness here means
+`check-dxf-import.ts` is the one suite that reads external files
+(`scripts/fixtures/dxf/`) rather than building its fixture inline — two real
+production DXFs, not synthetic ones, because parser correctness here means
 "agrees with what a real exporter actually writes," which a hand-built fixture
-cannot prove either way. `check-grading.ts` is the one suite that also
+cannot prove either way. The second file earned its place immediately by
+exposing a `SEQEND` desync the first one structurally could not. `check-grading.ts` is the one suite that also
 exercises the Zustand stores directly (not just pure
 `pattern/` functions) — undo/redo exactness for a command is only provable by
 running the real command through the real history stack.
@@ -318,12 +319,17 @@ settles.
   to flag a length mismatch across the size range, but nothing yet visualises
   a walk seam-to-seam the way a Fit walk tool would.
 
-### 5. DXF — import is real for one file's worth of production data; export is not
+### 5. DXF — import is real for two files' worth of production data; export is not
 
-A real production DXF (`scripts/fixtures/dxf/5109s-sp27-pattern.dxf`, 5 pieces,
-AAMA/ASTM-style BLOCK/INSERT with $INSUNITS in inches) is now the truth source
-for what this importer claims to handle, replacing the "throws unconditionally"
-scaffold. What changed and what didn't:
+Two real production DXFs are the truth source for what this importer claims to
+handle, replacing the "throws unconditionally" scaffold:
+
+| Fixture | What it is | What it proves |
+| --- | --- | --- |
+| `5109s-sp27-pattern.dxf` | 5 pieces, BLOCK/INSERT, `$INSUNITS` in inches | Boundary polylines, placement, unit conversion, vertex-noise cleanup |
+| `tshirt-demo-aama.dxf` | 20 blocks (5 pieces × 3 sizes), different writer, declares ASTM D6673-04 | No `$INSUNITS` (uses a `Units:` field), `Key:Value` metadata, `LINE` and `TEXT` entities, `SEQEND` with trailing fields |
+
+What changed and what didn't:
 
 - **`io/dxf/tokenizer.ts` (new) + `import.ts` (real).** ASCII group-code
   tokeniser, then a section/block/entity walker: `BLOCK`→candidate piece,
@@ -347,27 +353,78 @@ scaffold. What changed and what didn't:
   (layer 1, `POLYLINE`) matches what `layerMapping.ts` already claimed. That is
   recorded in a new `observedInFixtures` field — deliberately *not* the same
   as flipping `verified: true`, which stays reserved for "checked against the
-  ASTM D6673 text itself," which still has not happened for any binding. The
-  other ten concepts (notches, grain, internal lines, drill holes, mirror
-  line, grade reference, annotation, stripe reference, sew line) are exactly
-  as unconfirmed as before — this file is a plain boundary-only export and
-  doesn't exercise any of them.
+  ASTM D6673 text itself," which still has not happened for any binding.
 - **Export is untouched.** Still `FormatNotImplementedError`, still gated on
   the (still unverified) layer table via `validateForExport`. Nothing about
   import proves export is safe to write — reading someone else's file and
   producing one a cutting room will trust are different risks.
-- **`check-dxf-import.ts`** (57 assertions) verifies every piece's geometry
-  against a second, independent transcription of the file's raw group codes
-  — not by calling back into the importer — plus determinism, a lossless
-  round trip through the app's own JSON format, malformed-input handling, and
-  a synthetic unsupported-entity case (a spliced-in `CIRCLE`, since the real
-  file happens not to contain one).
-- **What would unblock the next slice**: a second real file, ideally one that
-  is *not* another plain boundary export — one with notches, a grain line, or
-  an actual curve entity would prove (or disprove) the next piece of
-  `layerMapping.ts` directly, the same way this one proved `piece-boundary`.
-  Guessing at those entity shapes from the ASTM text alone is the exact
-  failure mode this module exists to avoid.
+- **`check-dxf-import.ts`** verifies every piece's geometry against a second,
+  independent transcription of each file's raw group codes — not by calling
+  back into the importer — plus determinism, a lossless round trip through
+  the app's own JSON format, malformed-input handling, and a synthetic
+  unsupported-entity case (a spliced-in `CIRCLE`, since neither real file
+  contains one).
+
+#### The second fixture, and what it changed
+
+`scripts/fixtures/dxf/tshirt-demo-aama.dxf` — 20 blocks (5 pieces × 3 sizes, a
+marker layout) from a different writer, declaring `ASTM/D13Proposal 1
+Version:D 6673-04`. Chosen precisely because it is *not* another boundary-only
+export. It differs on every axis that exercises the parser: no `$INSUNITS`, a
+`Units:METRIC` text field instead, self-labelled `Key:Value` metadata at two
+scopes, `LINE` on two layers, `TEXT` on two more, and `SEQEND` entities
+carrying trailing group codes.
+
+- **It found a real parser bug.** `readPolyline` consumed `SEQEND`'s `0`
+  marker but not its fields, leaving a stray group code that the block reader
+  then took for an entity marker — reporting `entity "1" is not supported`
+  once per block. Fixture 1's `SEQEND` carries no trailing fields, so a
+  one-file suite could never have caught it. Fixed by consuming the fields
+  (same for `ENDBLK`), and `skipEntity` now names a stray group code as such
+  instead of dressing it up as an entity. Regression-tested, and verified to
+  fail against the pre-fix parser.
+- **Metadata is now read where the file labels it.** `Piece Name:`, `Quantity:`,
+  `Size Name:`, `Style Name:`, `Units:` and friends are parsed from `TEXT`
+  entities of the form `Key:Value`. This is *reading*, not layer-semantics
+  inference — the file names its own fields in English — but it is still a
+  writer convention, so every value read this way is reported via
+  `metadata-read-from-text` rather than presented as guaranteed. Unknown keys
+  are left alone. `Quantity:1,0` is genuinely ambiguous (decimal comma, or a
+  pair?) so only the first field is taken, which means 1 under both readings,
+  and the rest is reported.
+- **Units now have a ranked source**: `$INSUNITS`, else the file's own
+  `Units:` field, else `options.assumeUnit`. The file's own statement beats
+  the caller's assumption, which is tested.
+- **`LINE` entities are kept as geometry with no meaning claimed.** They become
+  `InternalLine`s with role `'construction'` and `cut: false`. This is the
+  central judgement call of this slice: the table says layer 7 is the grain
+  line and the entity kind agrees, but the same file puts an equally
+  grain-shaped `LINE` on layer 5, and nothing available distinguishes them. A
+  piece cut off-grain is scrap, so the geometry is preserved exactly and
+  `piece.grainLine` is left undefined. Asserted in the tests, so a later
+  change that starts claiming grain has to do it deliberately.
+- **The layer table is now measurably wrong in three places**, not just
+  suspected: layer 5 holds `LINE` (table says `POINT`), layer 15 holds `TEXT`
+  (table says a polyline), and layer 1 holds metadata `TEXT` as well as the
+  boundary. Recorded in a new `conflictingEvidence` field and reported per
+  import as `layer-entity-conflict`. The numbers were **not** changed — one
+  writer's habits are not the standard, and a table edited to match whichever
+  file arrived last is worse than one honestly wrong in a documented way.
+- **Layer reporting is now three-state.** Every (layer, entity) pair the file
+  uses is reported as supported (and how it was treated: outline, construction
+  geometry, or metadata), unsupported, or conflicting with the table.
+- **A marker's repeated sizes are stated, not flattened.** The same piece
+  recurs once per size; each placement imports as its own piece, and
+  `sizes-imported-flat` says so. No graded size range is inferred — that would
+  be grading, which this module does not invent.
+- **What would unblock the next slice**: a file with a **notch** in it.
+  Notches drive seam matching, the `Notch` model is already there, and neither
+  fixture contains one, so the layer-4 binding is untested by anything. A file
+  with a real curve entity (`ARC`, `SPLINE`, or `POLYLINE` bulge factors) is
+  next most useful — both fixtures are densely-sampled straight lines, so the
+  curve path has never run on real data. Failing either, the ASTM D6673 text
+  would settle the three conflicts above, which no quantity of vendor files
+  can.
 
 ### 6. Review diffs
 
