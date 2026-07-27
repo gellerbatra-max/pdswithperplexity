@@ -24,13 +24,22 @@ modify it. Study its patterns and follow them.
 | Zustand stores | `apps/pds/src/store/` | Follow the same store shape — one concern per file |
 | Command registry | `apps/pds/src/commands/` | Follow the same plain-TS pattern |
 
-### Existing stack (match exactly):
+### Pinned versions (exact, no ^ or ~):
 
-- React 19.2.0
-- TypeScript ~5.9.0 (strict mode)
-- Vite 7.1.0
-- Zustand 5.0.8
-- `@vitejs/plugin-react` 5.0.0
+| Package | Version | Note |
+|---|---|---|
+| react | 19.2.0 | per spec |
+| react-dom | 19.2.0 | per spec |
+| zustand | 5.0.8 | per spec |
+| konva | 9.3.18 | per spec |
+| dexie | 4.0.11 | per spec |
+| vite | 7.3.6 | 7.1.0 has high-severity CVEs (path traversal, server.fs.deny bypass); 7.3.6 is the fixed resolved version |
+| typescript | 5.9.3 | 5.9.0 was never published stable; 5.9.3 is the first stable 5.9.x |
+| @vitejs/plugin-react | 5.0.0 | per spec |
+| vitest | 3.2.4 | devDependency, add in Step 1 |
+
+All packages in the `dependencies` block must be pinned exact — no `^` or `~`.
+`devDependencies` may use `~` for patch-level flexibility only.
 
 ### Two hard rules from PDS that carry into ALL new code:
 
@@ -550,24 +559,45 @@ Auto-save strategy:
 
 ---
 
+## Git Commit Rule (mandatory after every step)
+
+After ALL verify checks for a step pass, run this exact command
+before saying "Step [N] complete ✓":
+
+```bash
+git add apps/marker
+git commit -m "feat(marker): step [N] — [short description]"
+```
+
+Commit message format: `feat(marker): step N — description`
+Examples:
+- `feat(marker): step 1 — scaffold, vite+react+ts+konva+dexie`
+- `feat(marker): step 2 — document model, selectors, migrations, tests`
+- `feat(marker): step 3 — zustand stores (marker, viewport, ui)`
+
+**Never leave a completed step uncommitted.**
+If a verify check fails, fix it first — do not commit broken state.
+Do NOT push unless I ask. Commit locally only.
+
+---
+
 ## Build Order
 
 Execute these steps in strict sequence. Do not start a step
-until the previous one passes its verification check.
+until the previous one passes its verification check AND is committed.
 
 ### Step 1 — Scaffold
 Create: `package.json`, `vite.config.ts`, `tsconfig.json`,
 `tsconfig.app.json`, `tsconfig.node.json`, `index.html`,
 `src/main.tsx`, `src/App.tsx` (empty div, no logic).
 
-`package.json` must match PDS versions exactly:
-- react: 19.2.0, react-dom: 19.2.0
-- zustand: 5.0.8
-- vite: 7.1.0, typescript: ~5.9.0
-- Add: konva: 9.3.18, dexie: 4.0.11
+Use the exact versions from the "Pinned versions" table above.
 
 ✓ Verify: `npm run dev --workspace=apps/marker` serves a blank page
 with no TypeScript errors.
+✓ Verify: `npm run typecheck --workspace=apps/marker` exits 0.
+✓ Verify: `npm audit --workspace=apps/marker` reports 0 vulnerabilities.
+→ Commit: `feat(marker): step 1 — scaffold, vite+react+ts+konva+dexie`
 
 ---
 
@@ -581,6 +611,7 @@ function that returns a `MarkerDocument` at schemaVersion 2.
 
 ✓ Verify: `npm run typecheck --workspace=apps/marker` passes.
 ✓ Verify: Vitest unit tests for all selectors pass.
+→ Commit: `feat(marker): step 2 — document model, selectors, migrations, tests`
 
 ---
 
@@ -601,6 +632,7 @@ Create: `src/store/uiStore.ts`
   `clearSelection`, `setStatus`
 
 ✓ Verify: stores import without circular dependencies.
+→ Commit: `feat(marker): step 3 — zustand stores (marker, viewport, ui)`
 
 ---
 
@@ -618,6 +650,7 @@ Create: `src/canvas/layers/FabricLayer.ts`
 
 ✓ Verify: A hardcoded 150cm × 500cm fabric renders on screen.
 ✓ Verify: Zoom in/out with `+`/`-` keys works. Pan with middle-mouse works.
+→ Commit: `feat(marker): step 4 — canvas foundation, fabric layer, zoom+pan`
 
 ---
 
@@ -638,6 +671,7 @@ Create: `src/canvas/tools/DragTool.ts`
 ✓ Verify: Seed the markerStore with 3 hardcoded test pieces.
 ✓ Verify: Drag a piece — it snaps correctly off other pieces and walls.
 ✓ Verify: No visible frame drops during drag.
+→ Commit: `feat(marker): step 5 — piece layer, drag tool, AABB+SAT collision`
 
 ---
 
@@ -652,6 +686,7 @@ Create all components in `src/components/`:
 
 ✓ Verify: Full layout renders with tray, canvas, dock, ribbon, status bar.
 ✓ Verify: All ribbon values update live when a piece is dragged.
+→ Commit: `feat(marker): step 6 — UI shell (topbar, tray, ribbon, dock, statusbar)`
 
 ---
 
@@ -664,6 +699,7 @@ Use drag-and-drop onto the canvas as the entry point.
 
 ✓ Verify: A basic AAMA DXF file loads and all pieces appear in the tray.
 ✓ Verify: UI remains responsive during parse (worker is off main thread).
+→ Commit: `feat(marker): step 7 — DXF import worker, AAMA parser`
 
 ---
 
@@ -676,6 +712,7 @@ write to IndexedDB. On app load, show the last-opened marker.
 
 ✓ Verify: Place pieces → close tab → reopen → all pieces are restored.
 ✓ Verify: Save indicator in top bar reflects saved/unsaved state.
+→ Commit: `feat(marker): step 8 — IndexedDB persistence, auto-save, restore points`
 
 ---
 
@@ -687,6 +724,7 @@ Wire to an "Auto-Nest" button in the top bar with a progress bar.
 ✓ Verify: Auto-nest places a 10-piece order onto the fabric.
 ✓ Verify: Utilization reported in ribbon is > 60%.
 ✓ Verify: UI does not freeze during nesting.
+→ Commit: `feat(marker): step 9 — bottom-left fill auto-nest worker`
 
 ---
 
@@ -698,6 +736,19 @@ Wire to export buttons in the right dock Options tab.
 
 ✓ Verify: Exported DXF opens correctly in any DXF viewer.
 ✓ Verify: HPGL file contains correct PU/PD commands at 1 plu = 0.025mm.
+→ Commit: `feat(marker): step 10 — AAMA DXF + HPGL export`
+
+---
+
+## Replying to Claude After Each Step
+
+After Claude says "Step [N] complete ✓", reply with:
+
+```
+Step [N] confirmed. Continue to Step [N+1].
+```
+
+If there are issues, describe them and Claude will fix before committing.
 
 ---
 
@@ -706,8 +757,9 @@ Wire to export buttons in the right dock Options tab.
 When starting a new Claude Code conversation on this project,
 always begin with:
 
-> "Read CLAUDE.md fully. I am continuing from Step [N].
-> Here is the current directory listing: [paste `find src -type f`].
+> "Read apps/marker/CLAUDE.md fully. I am continuing from Step [N].
+> Here is the current directory listing: [paste `find apps/marker/src -type f`].
+> The last git commit was: [paste `git log --oneline -5`].
 > Continue from where we left off."
 
 The architecture lives in this file — not in chat history.
