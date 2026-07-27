@@ -87,6 +87,13 @@ TS6307. The correct strategy:
 - **Never** add a TS project reference to PDS or widen marker's `include`
   to reach into PDS source files.
 
+### Step 4 canvas clarifications
+- Konva 9.3.18 deprecates `FastLayer`. Use `new Konva.Layer({ listening: false })`
+  for non-interactive layers (`FabricLayer`, `OverlayLayer`, `UILayer`) so the
+  console stays clean while keeping the same intent.
+- The prose in the original coordinate description was backwards. Canonical axes:
+  **length runs along +X, width runs across +Y**. Keep `fabricWidth` on the Y axis.
+
 ---
 
 ## What We Are Building
@@ -130,7 +137,7 @@ apps/marker/
     ├── canvas/
     │   ├── MarkerCanvas.ts      ← Konva stage manager (imperative, no React)
     │   ├── layers/
-    │   │   ├── FabricLayer.ts   ← Static bg (Konva.FastLayer)
+    │   │   ├── FabricLayer.ts   ← Static bg (Konva.Layer with listening: false)
     │   │   ├── PieceLayer.ts    ← Interactive pieces (Konva.Layer)
     │   │   ├── OverlayLayer.ts  ← Defect zones, splice lines, violations
     │   │   └── UILayer.ts       ← Rulers, labels, cursor readout
@@ -170,7 +177,7 @@ File: `apps/marker/src/marker/schema.ts`
 
 **All coordinates are in CENTIMETRES.**
 Origin 0,0 = bottom-left corner of fabric.
-Width runs right (+X), length runs up (+Y).
+Length runs along (+X), width runs across (+Y).
 
 ```typescript
 export interface MarkerDocument {
@@ -310,13 +317,13 @@ pieces; direct Konva sustains 31+ FPS.
 
 ### Layer stack (bottom to top):
 
-1. `FabricLayer` (Konva.FastLayer) — fabric rect, width guide
+1. `FabricLayer` (`Konva.Layer({ listening: false })`) — fabric rect, width guide
    lines, ruler ticks. Redrawn only on fabricWidth/zoom change.
 2. `PieceLayer` (Konva.Layer) — one Konva.Group per placed piece
    containing polygon shape + label text. All drag events here.
-3. `OverlayLayer` (Konva.FastLayer) — defect zones (red rect),
+3. `OverlayLayer` (`Konva.Layer({ listening: false })`) — defect zones (red rect),
    splice lines (dashed vertical), violation outlines (red dash).
-4. `UILayer` (Konva.FastLayer) — cursor coordinates, selection
+4. `UILayer` (`Konva.Layer({ listening: false })`) — cursor coordinates, selection
    handles, marquee rectangle during drag-select.
 
 ### Performance rules — enforce always:
@@ -701,8 +708,8 @@ Then create: `src/canvas/MarkerCanvas.ts`
 
 Create: `src/canvas/layers/FabricLayer.ts`
 - Renders fabric rectangle (light grey fill)
-- Renders dashed vertical line at `fabricWidth`
-- Renders horizontal ruler ticks every 10 cm
+- Renders dashed line at `fabricWidth` (top edge in marker space)
+- Renders ruler ticks every 10 cm
 
 ✓ Verify: A hardcoded 150cm × 500cm fabric renders on screen.
 ✓ Verify: Zoom in/out with `+`/`-` keys works. Pan with middle-mouse works.
