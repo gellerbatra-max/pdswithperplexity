@@ -300,6 +300,17 @@ konvaY = (fabricWidth - piece.position.y) * scale + panY
 Features and tools always work in marker space (cm).
 The renderer converts to Konva space. Never mix units.
 
+### Piece transform order (canonical):
+
+Horizontal flip first, then rotate counter-clockwise by
+`piece.rotation`, then translate by `piece.position`.
+
+Rendering, collision and nesting must all apply this order. Any
+divergence puts a piece somewhere other than where it collides, and
+the symptom — pieces overlapping only when flipped — reads as a
+collision bug rather than a transform bug. `marker/selectors.ts`
+already implements it.
+
 ---
 
 ## Collision Detection
