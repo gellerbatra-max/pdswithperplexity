@@ -44,10 +44,19 @@ export interface LayerBinding {
   readonly label: string;
   /** Entity kinds legitimately found on this layer. */
   readonly entities: readonly string[];
-  /** Set true only once confirmed against ASTM D6673 and real vendor files. */
+  /** Set true only once confirmed against ASTM D6673 *and* real vendor files. */
   readonly verified: boolean;
   /** Flavour-specific note, where the two profiles diverge. */
   readonly note?: string;
+  /**
+   * Fixtures (under `scripts/fixtures/dxf/`) that this binding's layer number
+   * and entity kind have actually been observed in. Weaker evidence than
+   * `verified` — it says "a real file agrees with this number," not "the
+   * published standard confirms it" — but it is real, and worth keeping
+   * separate from a guess rather than folding into `verified` and overstating
+   * it. Empty or absent means no real file has exercised this concept yet.
+   */
+  readonly observedInFixtures?: readonly string[];
 }
 
 /**
@@ -60,7 +69,12 @@ const BASE_BINDINGS: readonly LayerBinding[] = [
     layer: 1,
     label: 'Piece boundary (cut line)',
     entities: ['POLYLINE', 'LWPOLYLINE'],
+    // Still `verified: false` — that flag is reserved for "checked against
+    // the ASTM D6673 text," which this has not been. What *has* happened:
+    // every piece in a real production export uses layer "1" with POLYLINE
+    // entities for its boundary, exactly as this binding already claimed.
     verified: false,
+    observedInFixtures: ['5109s-sp27-pattern.dxf'],
   },
   {
     concept: 'turn-point',

@@ -127,9 +127,40 @@ export const validateForExport = (
   return issues;
 };
 
+/** How close two points must be, in millimetres, to call them the same vertex. */
+const SAME_POINT_TOLERANCE_MM = 1e-6;
+
 /**
- * Checks to run on a document produced by the importer. Written now so the
- * parser has a target to satisfy; it is not called until one exists.
+ * Points that repeat an earlier point in the ring without being adjacent to
+ * it — a boundary that visits the same coordinate twice is either a real,
+ * unusual piece (a binding strip with a return path) or an export mistake,
+ * and this module cannot tell those apart. What it can do is say so, rather
+ * than silently importing a self-overlapping outline as if it were an
+ * ordinary simple polygon — seen in real production files (a fixture under
+ * `scripts/fixtures/dxf/` has two pieces that trip this).
+ */
+const nonAdjacentRepeatCount = (piece: PatternPiece): number => {
+  const n = piece.points.length;
+  let count = 0;
+  for (let i = 0; i < n; i += 1) {
+    for (let j = i + 1; j < n; j += 1) {
+      const adjacent = j === i + 1 || (i === 0 && j === n - 1);
+      if (adjacent) continue;
+      const a = piece.points[i]!.position;
+      const b = piece.points[j]!.position;
+      if (
+        Math.abs(a.x - b.x) <= SAME_POINT_TOLERANCE_MM &&
+        Math.abs(a.y - b.y) <= SAME_POINT_TOLERANCE_MM
+      ) {
+        count += 1;
+      }
+    }
+  }
+  return count;
+};
+
+/**
+ * Checks to run on a document produced by the importer.
  */
 export const validateImportedDocument = (
   document: PatternDocument,
@@ -150,6 +181,17 @@ export const validateImportedDocument = (
         severity: 'error',
         code: 'import-no-points',
         message: `"${piece.name}" was read with no points.`,
+        pieceId: piece.id,
+      });
+      continue;
+    }
+
+    const repeats = nonAdjacentRepeatCount(piece);
+    if (repeats > 0) {
+      issues.push({
+        severity: 'warning',
+        code: 'self-overlapping-boundary',
+        message: `"${piece.name}" revisits an earlier point ${repeats} time(s) without being adjacent to it — its boundary is not a simple polygon. This may be intentional (e.g. a binding strip's return path) or a source-file issue; review before cutting.`,
         pieceId: piece.id,
       });
     }

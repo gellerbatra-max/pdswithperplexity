@@ -30,14 +30,15 @@ intended tool sets, because there the list is the only statement of coverage.
 | Seam allowance | Real — a true polygon offset, per-edge widths, `npm run check:offset` |
 | Point / segment / piece move | Real — drag with preview, one undoable command per gesture |
 | Curve shaping (control handles) | Real — drag handles; smooth/corner is user-controlled |
-| Insert / delete outline point | Real — split is exact; merge is exact only when undoing a split |
+| Insert / delete outline point | Real — split is always exact; merge is exact for line+line, same-circle arc+arc, and collinear cubic+cubic (an undone split), an honest tangent-preserving approximation otherwise |
 | Add / remove notch | Real — alt-double-click an edge, or remove from the inspector |
 | Arc length + closest point | Exact — adaptive quadrature, multi-basin Newton solve |
 | Circular arcs | Real — exact length, split, closest point; Line/Curve/Arc in the inspector |
 | Point role (smooth / corner) | Real — inspector control, enforced on handles, shown on canvas |
 | Numeric point + edge editing | Real — inspector writes through commands |
-| Grading | **Fake** — a per-point translation, not a solver |
-| DXF import/export | **Not implemented** — throws |
+| Grading | Real — named sizes, a shared grade-rule table, per-point propagation, full rule/assignment CRUD as undoable commands, real diagnostics. See below; a real *solver* (construction-line-aware, seam-length-preserving) is still future work |
+| DXF import | Real for what one production file proves — boundary polylines via BLOCK/INSERT, straight-line geometry, unit conversion. Notches, grain, internal lines, curves: not read yet, warned and skipped. Not reachable from the UI (no file picker) |
+| DXF export | **Not implemented** — throws |
 | Undo/redo | Real — inverse-command stack (`historyStore.ts` + `documentCommands.ts`) |
 | Persistence | Real, partially — autosave to IndexedDB; **no file story yet** (no download/upload) |
 | Piece editing (name, code, fabric, qty, allowance, fold, mirror) | Real — command-driven and undoable |
@@ -133,12 +134,20 @@ to the source. It takes per-edge distances, so `PieceSegment.seamAllowance`
 overrides work. `npm run check:offset` verifies it against hand-derivable
 answers — squares, an L, a slot narrower than twice the offset, and a circle.
 
-`npm run check` runs all three self-check suites — curve, offset and
-round-trip, 128 assertions. They are not a test framework and are not an
-argument for adding one; they exist because this is the code whose mistakes look
-plausible on screen and only show up in someone's cut file. `scripts/` carries a
-small Node resolver hook so the checks can import the app's aliased,
-extensionless source without a bundler or any dependency.
+`npm run check` runs all five self-check suites — curve, offset, round-trip,
+grading and DXF import, 255 assertions. They are not a test framework and are
+not an argument for adding one; they exist because this is the code whose
+mistakes look plausible on screen and only show up in someone's cut file.
+`scripts/` carries a small Node resolver hook so the checks can import the
+app's aliased, extensionless source without a bundler or any dependency.
+`check-dxf-import.ts` is the one suite that reads an external file
+(`scripts/fixtures/dxf/`) rather than building its fixture inline — a real
+production DXF, not a synthetic one, because parser correctness here means
+"agrees with what a real exporter actually writes," which a hand-built fixture
+cannot prove either way. `check-grading.ts` is the one suite that also
+exercises the Zustand stores directly (not just pure
+`pattern/` functions) — undo/redo exactness for a command is only provable by
+running the real command through the real history stack.
 
 Still open here:
 
@@ -150,21 +159,37 @@ Still open here:
   curves, visible only on a very sharp hard corner.
 - **The cut line is a polyline, not curves.** Fine to draw and to cut; a DXF
   writer emitting curve entities would need Béziers re-fitted through it.
-- **Merging two edges is exact only when it undoes a split.** `removePoint`
-  recovers the split parameter from the join geometry (at a split, the two inner
-  handles and the joint are collinear) and rescales the surviving handles by it,
-  so insert-then-delete round-trips to floating-point noise. Merging two edges
-  that were never halves of one curve falls back to arc-length share and is a
-  genuine approximation — two cubics are generally not one cubic. Undo is the
-  only exact way back.
-- **The offset is O(n²) and it is now the bottleneck.** Trimming
-  self-intersections compares every offset edge against every earlier one. On a
-  seed piece (4–64 ring points) it is sub-millisecond; on a 120-segment outline
-  with 1087 ring points it takes **~57 ms**. It is cached per piece object, so
-  static viewing is fine — but a drag builds a new piece every frame, so
-  reshaping a dense piece with the seam-allowance layer on will not hold 60 fps.
-  A sweep-line or a uniform grid over the offset edges is the fix; nothing else
-  in the kernel is close to this cost.
+- **Merging two edges is exact whenever the pair admits an exact merge.**
+  `removePoint` checks three cases before falling back: two lines merge to a
+  line; two arcs on the same circle (matching centre, radius, direction) merge
+  to one arc spanning both sweeps; two cubics merge to one cubic when their
+  shared handles are exactly collinear through the joint — the signature de
+  Casteljau subdivision leaves behind, and the check that tells an undone split
+  apart from two cubics that were drawn independently and merely happen to
+  meet (a bare ratio-in-range check used to accept those too, which is a
+  correctness bug, not just an approximation — a false claim of exactness).
+  Anything else merges to an approximate cubic whose handles follow the *true
+  tangent* of whatever was actually there (a line's own direction, an arc's
+  exact tangent), never the chord between the two surviving points — arcs
+  used to silently collapse straight to a `LINE` here, discarding real
+  curvature rather than approximating it. Notches ride the same share as the
+  geometry (the split ratio when exact, arc-length share otherwise — which is
+  *itself* exact for lines and arcs, only cubics need the split ratio), so a
+  notch no longer quietly drifts on an otherwise-exact merge. `npm run
+  check:roundtrip` proves the exact cases bit-for-bit (segment geometry and
+  notch parameter both) and the two traps (a non-collinear cubic pair, two
+  arcs on different circles) that would fool a check that only tested ratios
+  or geometry kind. Undo is the only exact way back from the approximate case.
+- **The offset was O(n²); it is now a uniform spatial grid.** Both the
+  self-intersection trim and the leftover-proximity filter used to compare
+  every edge against every earlier one. `geometry/offset.ts` now indexes
+  edges in a `SegmentGrid` sized to the locality of the problem — the offset
+  distance for the proximity filter, average point spacing for the trim — so
+  each edge only queries nearby cells. A 120-segment, 1087-point outline
+  dropped from ~57 ms to ~3.5 ms, and `npm run check:offset` pins both a
+  timing budget and sub-quadratic scaling so this cannot regress silently.
+  Verified bit-identical against the old algorithm on every fixture plus dense
+  stress shapes before the rewrite landed.
 - Notches attach to a segment by parameter `t`, so they survive reshaping for
   free. Keep that property.
 - Geometry near the top of the stage sits under the ruler overlay, which
@@ -210,17 +235,74 @@ the sagitta. Line/Curve/Arc is a control on the selected edge. This matters
 beyond tidiness — DXF, the format pattern CAD actually exchanges, expresses most
 curved seams as arcs, so import would have hit this immediately.
 
-### 3. Grading math
+Two consumers had quietly missed this audit and were caught while hardening
+`removePoint`: merging two arcs fell back to a straight `LINE` (see above), and
+the notch renderer drew its inward tick perpendicular to the segment's *chord*
+rather than the tangent at the notch's own `t` — invisible on a gentle curve,
+wrong on a sharp one. Both now go through `tangentOnSegment`/`resolveArc` like
+everything else here.
 
-- `pattern/nest.ts` translates each point by its rule. A real solver moves points
-  along construction lines, re-fits curves through the nest instead of dragging
-  control handles, and keeps mating seam lengths equal across sizes.
-- Keep the public surface — `gradePiece`, `nestPiece`, `gradeVectors` — so the
-  overlay, drawer and inspector keep working while the internals change.
-- The grade-rule model (rules shared across many points) is already the shape
-  graders expect; it should not need changing.
-- Once real, the mock anomalies in `features/grade/mockData.ts` become derived
-  checks. Emit them as `Diagnostic` from `@/diagnostics`.
+### 3. Grading — done, except the solver math itself
+
+Grading is a real subsystem now: a named size range with a base size
+(`SizeRange`), a shared grade-rule table (`GradeRule` — code, label, a
+dx/dy `GradeIncrement` per size), and `PiecePoint.gradeRuleId` associating a
+point to a rule. That model was already sound before this pass — it is the
+industry-standard "X/Y grading" technique, not a placeholder — what was
+missing was propagation correctness, a command layer, and real diagnostics.
+All three are done:
+
+- **Propagation** (`pattern/nest.ts`, `buildGraded`). Cubic handles move by
+  *their own anchor's* delta — `control1` with `from`, `control2` with `to`,
+  exactly like `pattern/edit.ts`'s `moveGeometry` — not the average of both
+  endpoints, which used to pivot a curve toward whichever end graded less.
+  Arc segments hold their radius constant while their endpoints move, which
+  is a legitimate, deliberate policy (a bow keeping its own shape rather than
+  scaling with the body), stated in the module doc and covered by
+  `gradeDiagnostics` for when it stretches an arc past what its radius can
+  reach. Notches need no special handling: they already ride a segment by
+  parameter, so they survive a regrade the same way they survive a manual
+  reshape.
+- **Commands** (`store/gradeCommands.ts`). `createGradeRule`,
+  `renameGradeRule`, `deleteGradeRule` (cascades — un-assigns the rule from
+  every point on every piece that carried it, one document snapshot for
+  undo since this is the one grading edit that can touch many pieces at
+  once), `setGradeIncrement` (refuses to write a non-zero value at the base
+  size — it is zero by definition), `setPointsGradeRule` (one or many points
+  at once — assigning "shoulder width" to the same anatomical point across
+  every piece in one action is the ordinary way a grader works). All go
+  through `historyStore`, same as every other edit in this app.
+- **Diagnostics** (`gradeDiagnostics` in `pattern/nest.ts`, replacing the
+  hand-written list in the now-deleted `features/grade/mockData.ts`). Two
+  real, exact checks, emitted as the shared `Diagnostic` from
+  `@/diagnostics`: an arc whose graded chord opens past twice its radius
+  (the one way the "hold the radius constant" policy can visibly fail), and
+  a `mateSegmentId` pair whose graded lengths diverge past 1mm. Both are
+  computed from the actual graded geometry, sized per size, not guessed.
+- **UI**. `GradeContext`'s rule library is a real editor — inline code/label
+  fields, add, delete. `GradePanel`'s point view assigns or clears a rule via
+  a dropdown and edits that rule's per-size increments directly; the base
+  row is fixed at zero. The dock lists only `Select`, because nothing here
+  needed a distinct canvas tool — see `GradeWorkspace.ts`'s comment.
+
+**What is still approximate, stated rather than hidden:**
+
+- Grading is still per-point X/Y, not construction-line-aware. A point moves
+  by its rule's raw offset; nothing here understands "this point stays on
+  the centre-front line" or "this dart apex tracks the bust point." That is
+  the real solver work — moving points along construction lines, re-fitting
+  curves through the nest instead of translating handles — and it is a
+  materially different, larger project than what shipped here.
+- Nothing *enforces* equal mating-seam lengths across the range;
+  `gradeDiagnostics` reports the mismatch, it does not correct it. Two
+  independently-ruled pieces will not usually mate exactly at every size,
+  which is the actual state of grading everywhere until a solver ties rules
+  together.
+- The size range itself (adding, removing, reordering sizes, changing the
+  base) has no editor. `SizeRange`/`SizeDefinition` are plain data and a
+  command would follow the same shape as `gradeCommands.ts`, but it does not
+  exist yet — a real gap, not an oversight, and the smallest reason none of
+  the above claims "done" without qualification.
 
 ### 4. Fit workspace
 
@@ -232,22 +314,60 @@ settles.
 - Ease analysis is then arithmetic: finished measurement minus body measurement,
   per size.
 - Walk-seam needs `segmentLength` (exists) plus mating-segment references —
-  `PieceSegment.mateSegmentId` is already in the model and unused.
+  `PieceSegment.mateSegmentId` is in the model; `gradeDiagnostics` now reads it
+  to flag a length mismatch across the size range, but nothing yet visualises
+  a walk seam-to-seam the way a Fit walk tool would.
 
-### 5. DXF parsing
+### 5. DXF — import is real for one file's worth of production data; export is not
 
-- **Start by verifying the layer table.** `io/dxf/layerMapping.ts` ships with
-  every binding marked `verified: false`, and `validateForExport` treats that as
-  a blocking error. Check each against ASTM D6673 and against files exported by
-  AccuMark, Optitex and Lectra. Do not skip this: wrong layer numbers are
-  silently wrong in someone else's CAD.
-- Export before import. We own the topology, so export is mostly emitting blocks
-  and choosing a chord tolerance.
-- Import is genuinely hard: DXF is a flat bag of geometry with no topology. Which
-  points belong to which outline, which are corners versus curve controls, and
-  which segment a notch sits on all have to be inferred by proximity.
-  `describeImportPlan` lays out the seven steps; step 5 is where the difficulty
-  lives. A converter that mis-attaches a notch is worse than no converter.
+A real production DXF (`scripts/fixtures/dxf/5109s-sp27-pattern.dxf`, 5 pieces,
+AAMA/ASTM-style BLOCK/INSERT with $INSUNITS in inches) is now the truth source
+for what this importer claims to handle, replacing the "throws unconditionally"
+scaffold. What changed and what didn't:
+
+- **`io/dxf/tokenizer.ts` (new) + `import.ts` (real).** ASCII group-code
+  tokeniser, then a section/block/entity walker: `BLOCK`→candidate piece,
+  `POLYLINE`/`VERTEX`/`SEQEND`→boundary, `INSERT`→placement, `$INSUNITS`→scale.
+  Any entity kind the walker doesn't have a reader for is skipped safely (every
+  DXF entity is delimited the same way, known or not) and produces a warning
+  naming it — never a silent drop, never a crash. `options.strict` promotes
+  those warnings to blocking errors.
+- **The topology "inference" this section used to warn about turned out to be
+  none, for this file.** A DXF `BLOCK` already *is* one piece; its `POLYLINE`
+  already *is* the boundary. The file carries no curve entities at all — every
+  edge is a densely-sampled straight-line polyline — so "every vertex is a
+  corner joined by a line" is a transcription of the file's actual content, not
+  a guess. What real vertex noise looked like: a consecutive duplicate point
+  (zero-length segment, collapsed with a diagnostic) and, in two of the five
+  pieces, a *non-adjacent* repeated vertex — a genuinely self-overlapping
+  boundary, imported as-is and flagged by a new `validateImportedDocument`
+  check (`self-overlapping-boundary`) rather than silently accepted or
+  silently "fixed."
+- **The layer table gained real evidence, not a rewrite.** `piece-boundary`
+  (layer 1, `POLYLINE`) matches what `layerMapping.ts` already claimed. That is
+  recorded in a new `observedInFixtures` field — deliberately *not* the same
+  as flipping `verified: true`, which stays reserved for "checked against the
+  ASTM D6673 text itself," which still has not happened for any binding. The
+  other ten concepts (notches, grain, internal lines, drill holes, mirror
+  line, grade reference, annotation, stripe reference, sew line) are exactly
+  as unconfirmed as before — this file is a plain boundary-only export and
+  doesn't exercise any of them.
+- **Export is untouched.** Still `FormatNotImplementedError`, still gated on
+  the (still unverified) layer table via `validateForExport`. Nothing about
+  import proves export is safe to write — reading someone else's file and
+  producing one a cutting room will trust are different risks.
+- **`check-dxf-import.ts`** (57 assertions) verifies every piece's geometry
+  against a second, independent transcription of the file's raw group codes
+  — not by calling back into the importer — plus determinism, a lossless
+  round trip through the app's own JSON format, malformed-input handling, and
+  a synthetic unsupported-entity case (a spliced-in `CIRCLE`, since the real
+  file happens not to contain one).
+- **What would unblock the next slice**: a second real file, ideally one that
+  is *not* another plain boundary export — one with notches, a grain line, or
+  an actual curve entity would prove (or disprove) the next piece of
+  `layerMapping.ts` directly, the same way this one proved `piece-boundary`.
+  Guessing at those entity shapes from the ASTM text alone is the exact
+  failure mode this module exists to avoid.
 
 ### 6. Review diffs
 
@@ -257,7 +377,9 @@ have versions.
 - Diff at the model level, not the pixel level: compare points, segments,
   notches and metadata by id, and render the result on the canvas as an overlay.
 - Findings from grading, DXF validation and review checks should all surface as
-  the shared `Diagnostic` in `@/diagnostics` so one UI renders all three.
+  the shared `Diagnostic` in `@/diagnostics` so one UI renders all three —
+  `gradeDiagnostics` already does this for grading; DXF validation and review
+  checks are the two still to bring in line.
 
 ### 7. Local AI integration
 
