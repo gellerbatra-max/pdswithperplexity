@@ -1,0 +1,42 @@
+/*
+ * Layout only, for now.
+ *
+ * TODO(step-6): pull in the PDS design tokens. They currently live at
+ * apps/pds/src/styles/tokens.css — reaching across apps for them would
+ * reintroduce exactly the coupling packages/geometry just removed, so they
+ * should move to packages/ alongside the shell work.
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  background: #ffffff;
+  color: #18181b;
+}
+
+.marker-app {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+}
+
+/* The Konva stage sizes itself to this element via ResizeObserver. */
+.marker-stage {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  background: #e4e4e7;
+  /* Middle-drag panning must not start a text selection. */
+  user-select: none;
+  touch-action: none;
+}
