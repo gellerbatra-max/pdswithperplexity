@@ -1,6 +1,7 @@
 import { useMarkerStore } from '@/store/markerStore';
 import { usePersistenceStore, type SaveState } from '@/store/persistenceStore';
 import { useUiStore } from '@/store/uiStore';
+import { AutoNestButton } from './AutoNestButton';
 
 const SAVE_LABELS: Record<SaveState, string> = {
   idle: 'Not saved yet',
@@ -28,6 +29,10 @@ export const TopBar = () => {
       <span className="topbar__name">{name}</span>
 
       <span className="topbar__spacer" />
+
+      <AutoNestButton />
+
+      <span className="topbar__divider" role="presentation" />
 
       <button
         type="button"

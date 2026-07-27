@@ -43,6 +43,15 @@ export interface MarkerState {
   placeFromTray: (trayPieceId: string, position: Point) => void;
   /** Add imported pieces to the tray, leaving placed pieces untouched. */
   addTrayPieces: (pieces: readonly TrayPiece[]) => void;
+  /** Apply an auto-nest result as one undoable step. */
+  applyPlacements: (
+    placements: readonly {
+      pieceDefId: string;
+      position: Point;
+      rotation: number;
+      flipped: boolean;
+    }[],
+  ) => void;
   addDefectZone: (zone: DefectZone) => void;
   addSpliceLine: (line: SpliceLine) => void;
   undo: () => void;
@@ -154,6 +163,49 @@ export const useMarkerStore = create<MarkerState>((set) => ({
         const fresh = pieces.filter((piece) => !known.has(piece.id));
         if (fresh.length === 0) return document;
         return { ...document, trayPieces: [...document.trayPieces, ...fresh] };
+      }),
+    ),
+
+  // One edit for the whole run: a nest that placed forty pieces must undo in
+  // one press, not forty.
+  applyPlacements: (placements) =>
+    set((state) =>
+      edit(state, (document) => {
+        if (placements.length === 0) return document;
+
+        const added: PlacedPiece[] = [];
+        const counts = new Map<string, number>();
+
+        for (const placement of placements) {
+          const tray = document.trayPieces.find((piece) => piece.id === placement.pieceDefId);
+          if (!tray) continue;
+          added.push({
+            id: crypto.randomUUID(),
+            pieceDefId: tray.id,
+            name: tray.name,
+            size: tray.size,
+            bundle: tray.bundle,
+            fabricCode: tray.fabricCode,
+            geometry: tray.geometry,
+            position: placement.position,
+            rotation: placement.rotation,
+            flipped: placement.flipped,
+            placed: true,
+            blocked: false,
+          });
+          counts.set(tray.id, (counts.get(tray.id) ?? 0) + 1);
+        }
+
+        if (added.length === 0) return document;
+
+        return {
+          ...document,
+          pieces: [...document.pieces, ...added],
+          trayPieces: document.trayPieces.map((piece) => {
+            const extra = counts.get(piece.id);
+            return extra === undefined ? piece : { ...piece, placed: piece.placed + extra };
+          }),
+        };
       }),
     ),
 

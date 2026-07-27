@@ -109,3 +109,24 @@ export const satCollision = (a: readonly Point[], b: readonly Point[]): Collisio
     mtv: { x: smallestAxis.x * smallestOverlap * sign, y: smallestAxis.y * smallestOverlap * sign },
   };
 };
+
+/**
+ * How far apart two convex polygons are. Zero when they touch or overlap.
+ *
+ * The widest gap over all edge normals: for convex shapes separated along an
+ * edge that is their true distance, and for vertex-to-vertex pairs it is an
+ * underestimate. Underestimating is the safe direction — a buffer check built
+ * on it holds pieces slightly further apart than asked, never closer.
+ */
+export const separation = (a: readonly Point[], b: readonly Point[]): number => {
+  if (a.length < 3 || b.length < 3) return 0;
+
+  let widestGap = 0;
+  for (const axis of [...axesOf(a), ...axesOf(b)]) {
+    const projectionA = project(a, axis);
+    const projectionB = project(b, axis);
+    const gap = Math.max(projectionA.min, projectionB.min) - Math.min(projectionA.max, projectionB.max);
+    if (gap > widestGap) widestGap = gap;
+  }
+  return widestGap;
+};

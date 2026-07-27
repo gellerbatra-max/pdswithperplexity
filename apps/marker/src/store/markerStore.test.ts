@@ -230,6 +230,78 @@ describe('placeFromTray', () => {
   });
 });
 
+describe('applyPlacements', () => {
+  const trayPiece = (id: string, quantity: number, placed: number): TrayPiece => ({
+    id,
+    name: `piece-${id}`,
+    size: 'M',
+    bundle: 'B1',
+    fabricCode: 'A',
+    geometry: [
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+    ],
+    layDirection: '2way',
+    quantity,
+    placed,
+  });
+
+  beforeEach(() => {
+    const document = doc();
+    document.trayPieces = [trayPiece('t1', 3, 0), trayPiece('t2', 1, 0)];
+    state().loadMarker(document);
+  });
+
+  it('places every result and counts them all', () => {
+    state().applyPlacements([
+      { pieceDefId: 't1', position: { x: 0, y: 0 }, rotation: 0, flipped: false },
+      { pieceDefId: 't1', position: { x: 20, y: 0 }, rotation: 180, flipped: false },
+      { pieceDefId: 't2', position: { x: 40, y: 0 }, rotation: 0, flipped: false },
+    ]);
+
+    expect(state().document?.pieces).toHaveLength(3);
+    expect(state().document?.trayPieces[0]?.placed).toBe(2);
+    expect(state().document?.trayPieces[1]?.placed).toBe(1);
+  });
+
+  it('is a single undo step for the whole run', () => {
+    state().applyPlacements([
+      { pieceDefId: 't1', position: { x: 0, y: 0 }, rotation: 0, flipped: false },
+      { pieceDefId: 't1', position: { x: 20, y: 0 }, rotation: 0, flipped: false },
+      { pieceDefId: 't2', position: { x: 40, y: 0 }, rotation: 0, flipped: false },
+    ]);
+    expect(state().past).toHaveLength(1);
+
+    state().undo();
+    expect(state().document?.pieces).toHaveLength(0);
+    expect(state().document?.trayPieces[0]?.placed).toBe(0);
+  });
+
+  it('carries rotation through to the placed piece', () => {
+    state().applyPlacements([
+      { pieceDefId: 't1', position: { x: 5, y: 5 }, rotation: 180, flipped: true },
+    ]);
+    const [piece] = state().document?.pieces ?? [];
+    expect(piece?.rotation).toBe(180);
+    expect(piece?.flipped).toBe(true);
+    expect(piece?.position).toEqual({ x: 5, y: 5 });
+  });
+
+  it('ignores a placement for a tray piece that is not there', () => {
+    state().applyPlacements([
+      { pieceDefId: 'ghost', position: { x: 0, y: 0 }, rotation: 0, flipped: false },
+    ]);
+    expect(state().document?.pieces).toHaveLength(0);
+    expect(state().past).toEqual([]);
+  });
+
+  it('does nothing for an empty result', () => {
+    state().applyPlacements([]);
+    expect(state().past).toEqual([]);
+  });
+});
+
 describe('undo and redo', () => {
   beforeEach(() => {
     state().loadMarker(doc());
