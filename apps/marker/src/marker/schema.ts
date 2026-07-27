@@ -6,7 +6,7 @@
  * to pixels; nothing in this module knows about screens.
  */
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 export interface Point {
   x: number;
@@ -15,7 +15,7 @@ export interface Point {
 
 export interface MarkerDocument {
   id: string;
-  schemaVersion: 2;
+  schemaVersion: 3;
   name: string;
   fabricWidth: number;
   endAllowance: number;
@@ -30,6 +30,14 @@ export interface MarkerDocument {
   comparison?: ComparisonLayer;
   createdAt: string;
   updatedAt: string;
+  /**
+   * When this marker was last opened, as distinct from last written.
+   *
+   * Auto-save touches `updatedAt` on every edit, so ordering by it answers
+   * "most recently changed", not "most recently worked on". Reopening the
+   * right marker needs the latter. Added in schemaVersion 3.
+   */
+  lastOpenedAt: string;
 }
 
 export type RotationRule = 'strict' | '90ok' | 'free';

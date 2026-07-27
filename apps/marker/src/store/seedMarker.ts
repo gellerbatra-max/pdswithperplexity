@@ -68,7 +68,7 @@ const tray = (
 
 export const createSeedMarker = (): MarkerDocument => ({
   id: 'seed-marker',
-  schemaVersion: 2,
+  schemaVersion: 3,
   name: 'Untitled marker',
   fabricWidth: 150,
   endAllowance: 4,
@@ -99,4 +99,5 @@ export const createSeedMarker = (): MarkerDocument => ({
   approvalState: 'draft',
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
+  lastOpenedAt: '2026-01-01T00:00:00.000Z',
 });

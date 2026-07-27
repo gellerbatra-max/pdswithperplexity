@@ -8,6 +8,10 @@
  * Schema v1 was never written down, so this migration is defensive rather than
  * a field-by-field mapping — it reads whatever is present at any version and
  * fills the rest.
+ *
+ * v2 → v3 added `lastOpenedAt`. A v2 document has no record of when it was
+ * last opened, and its `updatedAt` is the closest honest answer: it is the
+ * last time anyone touched the file.
  */
 
 import { CURRENT_SCHEMA_VERSION } from './schema';
@@ -195,6 +199,9 @@ export const migrate = (raw: unknown): MarkerDocument => {
     approvalState: asMember(raw.approvalState, APPROVAL_STATES, 'draft'),
     createdAt: asString(raw.createdAt, EPOCH),
     updatedAt: asString(raw.updatedAt, EPOCH),
+    // Absent before v3. Falling back to updatedAt keeps ordering sensible
+    // rather than sinking every older marker to the bottom of the list.
+    lastOpenedAt: asString(raw.lastOpenedAt, asString(raw.updatedAt, EPOCH)),
   };
   if (raw.comparison !== undefined) document.comparison = asComparison(raw.comparison);
   return document;

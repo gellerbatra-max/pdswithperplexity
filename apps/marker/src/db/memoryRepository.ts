@@ -51,11 +51,13 @@ export const createMemoryRepository = (): MemoryRepository => {
 
     loadMarker: async (id) => markers.get(id),
 
+    // Must mirror dexieRepository exactly: ordering by updatedAt here would
+    // let a test pass against behaviour the real database does not have.
     lastOpened: async () =>
-      [...markers.values()].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt)).at(-1),
+      [...markers.values()].sort((a, b) => a.lastOpenedAt.localeCompare(b.lastOpenedAt)).at(-1),
 
     listMarkers: async () =>
-      [...markers.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+      [...markers.values()].sort((a, b) => b.lastOpenedAt.localeCompare(a.lastOpenedAt)),
 
     addRestorePoint: async (point) => {
       points.set(point.id, structuredClone(point));

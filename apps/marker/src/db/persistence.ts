@@ -75,6 +75,7 @@ export interface RestoreOutcome {
 export const restoreOrSeed = async (
   repository: MarkerRepository = dexieRepository,
   persistence?: Persistence,
+  openedAt: string = new Date().toISOString(),
 ): Promise<RestoreOutcome> => {
   let stored: MarkerDocument | undefined;
   try {
@@ -86,10 +87,20 @@ export const restoreOrSeed = async (
   }
 
   if (stored) {
-    useMarkerStore.getState().loadMarker(stored);
+    // Stamp the open before handing it to the store, and write it straight
+    // through: this is the one field that changes without being an edit, so
+    // it must not ride on the debounce or it will be lost on a quick close.
+    const opened: MarkerDocument = { ...stored, lastOpenedAt: openedAt };
+    useMarkerStore.getState().loadMarker(opened);
     persistence?.autoSave.cancel();
-    usePersistenceStore.getState().markSaved(stored.updatedAt);
-    return { marker: stored, restored: true };
+    try {
+      await repository.saveMarker(opened);
+      usePersistenceStore.getState().markSaved(openedAt);
+    } catch {
+      // A failed stamp is not worth blocking the open; the next edit saves.
+      usePersistenceStore.getState().markSaved(stored.updatedAt);
+    }
+    return { marker: opened, restored: true };
   }
 
   const seeded = createSeedMarker();

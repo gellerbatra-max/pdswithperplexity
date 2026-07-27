@@ -9,7 +9,7 @@ describe('migrate', () => {
   });
 
   it('rejects a document written by a newer build', () => {
-    expect(() => migrate({ id: 'm1', schemaVersion: 3 })).toThrow(/newer than this build/);
+    expect(() => migrate({ id: 'm1', schemaVersion: 4 })).toThrow(/newer than this build/);
   });
 
   it('rejects a document with no id, which could never be reopened', () => {
@@ -17,7 +17,33 @@ describe('migrate', () => {
   });
 
   it('stamps the current schema version', () => {
-    expect(migrate({ id: 'm1' }).schemaVersion).toBe(2);
+    expect(migrate({ id: 'm1' }).schemaVersion).toBe(3);
+  });
+
+  it('carries a v2 document forward by seeding lastOpenedAt from updatedAt', () => {
+    const doc = migrate({
+      id: 'm1',
+      schemaVersion: 2,
+      updatedAt: '2026-05-02T00:00:00.000Z',
+    });
+    expect(doc.schemaVersion).toBe(3);
+    // A v2 document has no record of being opened; when it was last written
+    // is the closest honest answer, and keeps it in sensible sort order.
+    expect(doc.lastOpenedAt).toBe('2026-05-02T00:00:00.000Z');
+  });
+
+  it('keeps an explicit lastOpenedAt when the document already has one', () => {
+    const doc = migrate({
+      id: 'm1',
+      schemaVersion: 3,
+      updatedAt: '2026-05-02T00:00:00.000Z',
+      lastOpenedAt: '2026-06-09T00:00:00.000Z',
+    });
+    expect(doc.lastOpenedAt).toBe('2026-06-09T00:00:00.000Z');
+  });
+
+  it('falls back to the epoch when a document has neither timestamp', () => {
+    expect(migrate({ id: 'm1' }).lastOpenedAt).toBe('1970-01-01T00:00:00.000Z');
   });
 
   it('fills defaults for everything a v1 document lacks', () => {

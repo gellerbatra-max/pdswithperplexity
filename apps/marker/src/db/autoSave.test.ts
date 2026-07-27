@@ -5,7 +5,7 @@ import { createMemoryRepository } from './memoryRepository';
 
 const doc = (overrides: { id?: string; name?: string; updatedAt?: string } = {}): MarkerDocument => ({
   id: overrides.id ?? 'doc-1',
-  schemaVersion: 2,
+  schemaVersion: 3,
   name: overrides.name ?? 'Test',
   fabricWidth: 150,
   endAllowance: 4,
@@ -19,6 +19,7 @@ const doc = (overrides: { id?: string; name?: string; updatedAt?: string } = {})
   approvalState: 'draft',
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: overrides.updatedAt ?? '2026-01-01T00:00:00.000Z',
+  lastOpenedAt: overrides.updatedAt ?? '2026-01-01T00:00:00.000Z',
 });
 
 beforeEach(() => {

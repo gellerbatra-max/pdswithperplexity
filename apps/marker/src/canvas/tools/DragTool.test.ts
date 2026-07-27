@@ -28,7 +28,7 @@ const piece = (id: string, geometry: Point[], position: Point): PlacedPiece => (
 
 const doc = (pieces: PlacedPiece[], cutterBuffer: 0 | 0.3 | 0.5 | 1 = 0): MarkerDocument => ({
   id: 'doc-1',
-  schemaVersion: 2,
+  schemaVersion: 3,
   name: 'Test',
   fabricWidth: 100,
   endAllowance: 4,
@@ -42,6 +42,7 @@ const doc = (pieces: PlacedPiece[], cutterBuffer: 0 | 0.3 | 0.5 | 1 = 0): Marker
   approvalState: 'draft',
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
+  lastOpenedAt: '2026-01-01T00:00:00.000Z',
 });
 
 /** True when the moved piece is clear of every convex part of every obstacle. */

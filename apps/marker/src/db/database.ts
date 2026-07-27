@@ -19,6 +19,22 @@ class MarkerDatabase extends Dexie {
       markers: 'id, name, updatedAt',
       restorePoints: 'id, markerId, createdAt',
     });
+    // schemaVersion 3 added lastOpenedAt. Existing rows need the field before
+    // they can be indexed on it, or they drop out of `lastOpened` entirely.
+    this.version(2)
+      .stores({
+        markers: 'id, name, updatedAt, lastOpenedAt',
+        restorePoints: 'id, markerId, createdAt',
+      })
+      .upgrade((transaction) =>
+        transaction
+          .table<MarkerDocument>('markers')
+          .toCollection()
+          .modify((marker) => {
+            marker.schemaVersion = 3;
+            marker.lastOpenedAt = marker.lastOpenedAt ?? marker.updatedAt;
+          }),
+      );
   }
 }
 
@@ -31,10 +47,11 @@ export const dexieRepository: MarkerRepository = {
 
   loadMarker: (id) => db.markers.get(id),
 
-  // updatedAt is an ISO 8601 string, so lexical order is chronological order.
-  lastOpened: () => db.markers.orderBy('updatedAt').last(),
+  // lastOpenedAt is ISO 8601, so lexical order is chronological order. Sorting
+  // on updatedAt would surface whichever marker an auto-save touched last.
+  lastOpened: () => db.markers.orderBy('lastOpenedAt').last(),
 
-  listMarkers: () => db.markers.orderBy('updatedAt').reverse().toArray(),
+  listMarkers: () => db.markers.orderBy('lastOpenedAt').reverse().toArray(),
 
   addRestorePoint: async (point) => {
     await db.restorePoints.put(point);

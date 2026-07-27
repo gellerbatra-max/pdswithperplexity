@@ -8,7 +8,7 @@ import { RESTORE_POINT_LIMIT } from './repository';
 
 const doc = (id: string, updatedAt: string, name = id): MarkerDocument => ({
   id,
-  schemaVersion: 2,
+  schemaVersion: 3,
   name,
   fabricWidth: 150,
   endAllowance: 4,
@@ -22,6 +22,7 @@ const doc = (id: string, updatedAt: string, name = id): MarkerDocument => ({
   approvalState: 'draft',
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt,
+  lastOpenedAt: updatedAt,
 });
 
 beforeEach(() => {
@@ -64,10 +65,51 @@ describe('restoreOrSeed', () => {
     const repository = createMemoryRepository();
     await repository.saveMarker(doc('m1', '2026-06-01T00:00:00.000Z'));
 
-    await restoreOrSeed(repository);
+    await restoreOrSeed(repository, undefined, '2026-07-01T09:00:00.000Z');
 
     expect(usePersistenceStore.getState().saveState).toBe('saved');
-    expect(usePersistenceStore.getState().lastSavedAt).toBe('2026-06-01T00:00:00.000Z');
+    expect(usePersistenceStore.getState().lastSavedAt).toBe('2026-07-01T09:00:00.000Z');
+  });
+
+  it('stamps lastOpenedAt and writes it straight through', async () => {
+    const repository = createMemoryRepository();
+    await repository.saveMarker(doc('m1', '2026-06-01T00:00:00.000Z'));
+
+    const outcome = await restoreOrSeed(repository, undefined, '2026-07-01T09:00:00.000Z');
+
+    expect(outcome.marker.lastOpenedAt).toBe('2026-07-01T09:00:00.000Z');
+    // Written immediately, not left on the debounce, or a quick close loses it.
+    expect(repository.markers.get('m1')?.lastOpenedAt).toBe('2026-07-01T09:00:00.000Z');
+    expect(useMarkerStore.getState().document?.lastOpenedAt).toBe('2026-07-01T09:00:00.000Z');
+  });
+
+  it('reopens by lastOpenedAt, not by whichever auto-save fired last', async () => {
+    const repository = createMemoryRepository();
+    // 'edited' was written most recently but opened long ago; 'worked-on' is
+    // the one the user actually had in front of them.
+    await repository.saveMarker({
+      ...doc('edited', '2026-06-30T00:00:00.000Z'),
+      lastOpenedAt: '2026-01-01T00:00:00.000Z',
+    });
+    await repository.saveMarker({
+      ...doc('worked-on', '2026-02-01T00:00:00.000Z'),
+      lastOpenedAt: '2026-06-01T00:00:00.000Z',
+    });
+
+    const outcome = await restoreOrSeed(repository, undefined, '2026-07-01T09:00:00.000Z');
+
+    expect(outcome.marker.id).toBe('worked-on');
+  });
+
+  it('opens normally when the lastOpenedAt stamp cannot be written', async () => {
+    const repository = createMemoryRepository();
+    await repository.saveMarker(doc('m1', '2026-06-01T00:00:00.000Z'));
+    repository.failNextSaves(1);
+
+    const outcome = await restoreOrSeed(repository, undefined, '2026-07-01T09:00:00.000Z');
+
+    expect(outcome.restored).toBe(true);
+    expect(useMarkerStore.getState().document?.id).toBe('m1');
   });
 
   it('falls back to a seed and reports when storage cannot be read', async () => {

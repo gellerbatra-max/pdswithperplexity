@@ -47,7 +47,7 @@ const trayPiece = (id: string, bundle: string, quantity: number, placed: number)
 /** Fresh empty document — 100 cm fabric, nothing placed. */
 const emptyDoc = (): MarkerDocument => ({
   id: 'doc-1',
-  schemaVersion: 2,
+  schemaVersion: 3,
   name: 'Test marker',
   fabricWidth: 100,
   endAllowance: 4,
@@ -61,6 +61,7 @@ const emptyDoc = (): MarkerDocument => ({
   approvalState: 'draft',
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
+  lastOpenedAt: '2026-01-01T00:00:00.000Z',
 });
 
 /** Two 10×10 squares, the second offset 20 cm along the fabric. */

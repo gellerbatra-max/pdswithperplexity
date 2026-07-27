@@ -5,7 +5,7 @@ import { markerFileName, parseMarker, serializeMarker } from './markerJson';
 
 const doc = (name = 'Spring tee'): MarkerDocument => ({
   id: 'doc-1',
-  schemaVersion: 2,
+  schemaVersion: 3,
   name,
   fabricWidth: 150,
   endAllowance: 4,
@@ -39,6 +39,7 @@ const doc = (name = 'Spring tee'): MarkerDocument => ({
   approvalState: 'approved',
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-05-02T00:00:00.000Z',
+  lastOpenedAt: '2026-05-02T00:00:00.000Z',
 });
 
 describe('round trip', () => {
@@ -72,7 +73,7 @@ describe('parseMarker', () => {
 
   it('migrates an older document rather than half-loading it', () => {
     const restored = parseMarker(JSON.stringify({ id: 'old-1', schemaVersion: 1, name: 'Legacy' }));
-    expect(restored.schemaVersion).toBe(2);
+    expect(restored.schemaVersion).toBe(3);
     expect(restored.endAllowance).toBe(4);
   });
 

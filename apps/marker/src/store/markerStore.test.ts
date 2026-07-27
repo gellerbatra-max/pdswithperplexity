@@ -23,7 +23,7 @@ const piece = (id: string): PlacedPiece => ({
 
 const doc = (): MarkerDocument => ({
   id: 'doc-1',
-  schemaVersion: 2,
+  schemaVersion: 3,
   name: 'Test marker',
   fabricWidth: 150,
   endAllowance: 4,
@@ -37,6 +37,7 @@ const doc = (): MarkerDocument => ({
   approvalState: 'draft',
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
+  lastOpenedAt: '2026-01-01T00:00:00.000Z',
 });
 
 const state = () => useMarkerStore.getState();
