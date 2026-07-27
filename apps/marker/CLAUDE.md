@@ -131,7 +131,7 @@ File: `apps/marker/src/marker/schema.ts`
 
 **All coordinates are in CENTIMETRES.**
 Origin 0,0 = bottom-left corner of fabric.
-Width runs right (+X), length runs up (+Y).
+Width runs across (+Y), length runs along (+X).
 
 ```typescript
 export interface MarkerDocument {
@@ -266,13 +266,17 @@ pieces; direct Konva sustains 31+ FPS.
 
 ### Layer stack (bottom to top):
 
-1. `FabricLayer` (Konva.FastLayer) — fabric rect, width guide
+Konva 9.3 deprecates `FastLayer`; the non-interactive layers use
+`new Konva.Layer({ listening: false })`, which is the same
+optimisation without the console warning.
+
+1. `FabricLayer` (`Layer`, listening off) — fabric rect, width guide
    lines, ruler ticks. Redrawn only on fabricWidth/zoom change.
 2. `PieceLayer` (Konva.Layer) — one Konva.Group per placed piece
    containing polygon shape + label text. All drag events here.
-3. `OverlayLayer` (Konva.FastLayer) — defect zones (red rect),
+3. `OverlayLayer` (`Layer`, listening off) — defect zones (red rect),
    splice lines (dashed vertical), violation outlines (red dash).
-4. `UILayer` (Konva.FastLayer) — cursor coordinates, selection
+4. `UILayer` (`Layer`, listening off) — cursor coordinates, selection
    handles, marquee rectangle during drag-select.
 
 ### Performance rules — enforce always:
