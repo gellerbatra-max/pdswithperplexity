@@ -53,10 +53,23 @@ export interface NestResult {
   readonly unplaced: string[];
 }
 
-const ROTATIONS: Record<LayDirection, readonly number[]> = {
-  '2way': [0, 180],
-  '4way': [0, 90, 180, 270],
-  free: [0, 45, 90, 135, 180, 225, 270, 315],
+/** A free piece gets 8 angles at effort 1, and 8 more for each step up. */
+const FREE_ANGLES_PER_EFFORT = 8;
+
+/**
+ * Angles this piece may be tried at.
+ *
+ * Effort subdivides the circle for free-direction pieces only: 8 angles at
+ * effort 1 through 40 at effort 5. Grain-constrained pieces ignore it — no
+ * amount of searching makes it acceptable to cut a two-way piece off-grain.
+ */
+export const rotationsFor = (layDirection: LayDirection, effort: NestEffort): number[] => {
+  if (layDirection === '2way') return [0, 180];
+  if (layDirection === '4way') return [0, 90, 180, 270];
+
+  const count = FREE_ANGLES_PER_EFFORT * effort;
+  const step = 360 / count;
+  return Array.from({ length: count }, (_, index) => index * step);
 };
 
 /**
@@ -202,11 +215,18 @@ export const nest = (input: NestInput, onProgress?: NestProgress): NestResult =>
   for (const piece of input.placed) placedArea += areaOf(piece.geometry);
 
   for (const [index, piece] of queue.entries()) {
-    const candidates = candidatesFor(piece, ROTATIONS[piece.layDirection]);
+    const candidates = candidatesFor(piece, rotationsFor(piece.layDirection, effort));
     let landed = false;
 
     // Scan x outermost so the marker grows only when the current column is
     // genuinely full — this is what makes it bottom-LEFT fill.
+    //
+    // TODO(performance): broad-phase spatial grid. This is
+    // O(positions x obstacles), positions scale with effort squared, and every
+    // obstacle is retested at every candidate position however far away it is.
+    // Bucketing obstacles into fabric-width cells and testing only the buckets
+    // a candidate touches would make the cost independent of marker length,
+    // which is what a 200-piece order at effort 5 needs.
     const maxX = markerLength + Math.max(...candidates.map((c) => c.bounds.maxX - c.bounds.minX)) +
       SCAN_MARGIN;
 

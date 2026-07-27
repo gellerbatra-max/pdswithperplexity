@@ -391,14 +391,31 @@ interface NestResult {
 ### Algorithm — Bottom-Left Fill:
 
 1. Sort pieces: largest bounding-box area first
-2. For each piece, collect allowed rotations from `layDirection`:
-   - `'2way'`: [0, 180]
-   - `'4way'`: [0, 90, 180, 270]
-   - `'free'`: [0, 45, 90, 135, 180, 225, 270, 315] × effort
+2. For each piece, collect allowed rotations from `layDirection`
+   (see the locked decision below)
 3. Scan placement grid at step `= 1.0 / effort` cm, left-to-right
    then bottom-to-top, trying each rotation
 4. First valid position (passes AABB + SAT vs all obstacles) = placed
 5. Add placed piece to obstacle list and continue
+
+### Locked decision — free rotation and effort
+
+`× effort` subdivides the circle; it does not repeat the same angles.
+Grain-constrained pieces ignore effort entirely: no amount of searching
+makes it acceptable to cut a two-way piece off-grain.
+
+| layDirection | Angles |
+|---|---|
+| `'2way'` | [0, 180] at every effort |
+| `'4way'` | [0, 90, 180, 270] at every effort |
+| `'free'` | `8 × effort` angles, evenly spaced from 0 |
+
+So a free piece gets 8 angles at 45° (effort 1), 16 at 22.5°, 24 at 15°,
+32 at 11.25°, and 40 at 9° (effort 5).
+
+Effort therefore costs twice over — it subdivides the placement grid
+*and* the angle set — so run time grows far faster than the number
+suggests. `rotationsFor` in `nest/heuristic.ts` is the implementation.
 
 ---
 

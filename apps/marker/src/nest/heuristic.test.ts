@@ -3,7 +3,7 @@ import { satCollision } from '@/canvas/collision/sat';
 import { orientPoints } from '@/canvas/collision/orient';
 import { translate } from '@/marker/pieceGeometry';
 import type { PlacedPiece, Point, TrayPiece } from '@/marker/schema';
-import { nest, type NestInput, type NestPlacement } from './heuristic';
+import { nest, rotationsFor, type NestInput, type NestPlacement } from './heuristic';
 
 const rect = (width: number, height: number): Point[] => [
   { x: 0, y: 0 },
@@ -182,6 +182,40 @@ describe('obstacles', () => {
     if (!first || !second) throw new Error('expected two placements');
     // Side by side along x, so the gap between them is the buffer.
     expect(Math.abs(second.position.x - first.position.x)).toBeGreaterThanOrEqual(41 - 1e-6);
+  });
+});
+
+describe('rotationsFor', () => {
+  it('ignores effort for grain-constrained pieces', () => {
+    for (const effort of [1, 2, 3, 4, 5] as const) {
+      expect(rotationsFor('2way', effort)).toEqual([0, 180]);
+      expect(rotationsFor('4way', effort)).toEqual([0, 90, 180, 270]);
+    }
+  });
+
+  it('subdivides the circle for free pieces, eight angles per effort step', () => {
+    expect(rotationsFor('free', 1)).toHaveLength(8);
+    expect(rotationsFor('free', 2)).toHaveLength(16);
+    expect(rotationsFor('free', 3)).toHaveLength(24);
+    expect(rotationsFor('free', 4)).toHaveLength(32);
+    expect(rotationsFor('free', 5)).toHaveLength(40);
+  });
+
+  it('spaces free angles evenly from zero', () => {
+    expect(rotationsFor('free', 1)).toEqual([0, 45, 90, 135, 180, 225, 270, 315]);
+    expect(rotationsFor('free', 2).slice(0, 3)).toEqual([0, 22.5, 45]);
+    expect(rotationsFor('free', 3).slice(0, 3)).toEqual([0, 15, 30]);
+    expect(rotationsFor('free', 4).slice(0, 3)).toEqual([0, 11.25, 22.5]);
+    expect(rotationsFor('free', 5).slice(0, 3)).toEqual([0, 9, 18]);
+  });
+
+  it('stays inside one turn', () => {
+    for (const effort of [1, 2, 3, 4, 5] as const) {
+      for (const angle of rotationsFor('free', effort)) {
+        expect(angle).toBeGreaterThanOrEqual(0);
+        expect(angle).toBeLessThan(360);
+      }
+    }
   });
 });
 
