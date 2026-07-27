@@ -1,5 +1,6 @@
-export type { Vec2, Rect, Bounds, Unit } from './types';
-export * as Vec from './vec';
-export * as BoundsOps from './bounds';
-export { toMillimetres, fromMillimetres, formatLength } from './units';
-export { perimeter, area } from './polygon';
+/**
+ * The geometry primitives now live in `packages/geometry`, shared with
+ * `apps/marker`. This re-export keeps PDS's existing `@/geometry` import sites
+ * working unchanged — import from `@repo/geometry` directly in new code.
+ */
+export * from '@repo/geometry';
