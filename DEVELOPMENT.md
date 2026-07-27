@@ -37,7 +37,7 @@ intended tool sets, because there the list is the only statement of coverage.
 | Point role (smooth / corner) | Real — inspector control, enforced on handles, shown on canvas |
 | Numeric point + edge editing | Real — inspector writes through commands |
 | Grading | Real — named sizes, a shared grade-rule table, per-point propagation, full rule/assignment CRUD as undoable commands, real diagnostics. See below; a real *solver* (construction-line-aware, seam-length-preserving) is still future work |
-| DXF import | Real for what two production files prove — boundary polylines via BLOCK/INSERT, straight-line geometry, units from `$INSUNITS` or a `Units:` field, self-labelled `Key:Value` metadata, `LINE` kept as unclaimed construction geometry. Notches, drill holes, curves: not read, warned and skipped. Grain deliberately *not* claimed. Not reachable from the UI (no file picker) |
+| DXF import | Real for what two production files prove — boundary polylines via BLOCK/INSERT, straight-line geometry, units from `$INSUNITS` or a `Units:` field, self-labelled `Key:Value` metadata, `LINE` kept as unclaimed construction geometry. Notches, drill holes, curves: not read, warned and skipped. Grain deliberately *not* claimed. Reachable from the UI: `Import DXF (AAMA/ASTM)…` picks a file, a review dialog shows the full account (per-layer treatment, table conflicts, diagnostics) before anything replaces the open document, and the session stays inspectable afterwards via `Show last DXF import report` |
 | DXF export | **Not implemented** — throws |
 | Undo/redo | Real — inverse-command stack (`historyStore.ts` + `documentCommands.ts`) |
 | Persistence | Real, partially — autosave to IndexedDB; **no file story yet** (no download/upload) |
@@ -135,7 +135,7 @@ overrides work. `npm run check:offset` verifies it against hand-derivable
 answers — squares, an L, a slot narrower than twice the offset, and a circle.
 
 `npm run check` runs all five self-check suites — curve, offset, round-trip,
-grading and DXF import, 325 assertions. They are not a test framework and are
+grading and DXF import, 329 assertions. They are not a test framework and are
 not an argument for adding one; they exist because this is the code whose
 mistakes look plausible on screen and only show up in someone's cut file.
 `scripts/` carries a small Node resolver hook so the checks can import the
@@ -425,6 +425,33 @@ carrying trailing group codes.
   curve path has never run on real data. Failing either, the ASTM D6673 text
   would settle the three conflicts above, which no quantity of vendor files
   can.
+
+#### The import workflow (how the parser is reached from the app)
+
+Import is a reviewed workflow, not a document swap. `Import DXF (AAMA/ASTM)…`
+in the palette opens a file picker; the chosen file parses into a *session*
+(`store/importStore.ts`) that holds the document, every diagnostic, and the
+structured per-layer account (`DxfImportResult.layers` — treatment plus
+whether the layer table agrees, so the UI never re-parses diagnostic message
+strings). The review dialog (`components/ImportReviewDialog.tsx`) shows all
+of it — what would be imported, how each layer was treated, table conflicts,
+diagnostics by severity — and only its Apply button touches the document
+store (then resets history and fits the view). Blocking errors disable Apply
+with the same rule `importDxf`'s throwing contract uses (`blocksConversion`).
+A structurally unparseable file gets a failed session showing the parser's
+own error; nothing is imported.
+
+The session outlives the apply: `Show last DXF import report` reopens the
+same dialog, because "what did that import skip?" usually gets asked later,
+when a piece looks wrong on the stage. Closing the dialog keeps the session;
+Discard drops it.
+
+`npm run report:dxf` is the batch form of the same account: it runs the
+importer over every fixture in `scripts/fixtures/dxf/` and prints the
+per-file support matrix plus the layer table's evidence state (verified /
+observed / contradicted / untested per concept). It is a report, not a check
+— drop a new real file into the fixtures directory and run it to see exactly
+what the importer makes of the file before writing a single assertion.
 
 ### 6. Review diffs
 

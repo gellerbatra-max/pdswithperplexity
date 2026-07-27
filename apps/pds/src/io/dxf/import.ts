@@ -10,7 +10,12 @@ import {
   type PieceSegment,
 } from '@/pattern';
 import { FormatParseError } from '../errors';
-import { layerForConcept, layerMapFor, unverifiedBindings } from './layerMapping';
+import {
+  layerForConcept,
+  layerMapFor,
+  unverifiedBindings,
+  type PatternConcept,
+} from './layerMapping';
 import { blocksConversion, summariseIssues, validateImportedDocument } from './validation';
 import { tokenizeDxf, tokenNumber, type DxfToken } from './tokenizer';
 import type { ConversionIssue, DxfFlavour, DxfImportOptions } from './types';
@@ -276,21 +281,30 @@ const resolveUnitFactor = (
  */
 
 /** How a given (layer, entity) pair was treated. */
-type LayerTreatment = 'outline' | 'construction' | 'metadata' | 'skipped';
+export type LayerTreatment = 'outline' | 'construction' | 'metadata' | 'skipped';
 
-const TREATMENT_LABEL: Record<LayerTreatment, string> = {
+export const TREATMENT_LABEL: Record<LayerTreatment, string> = {
   outline: 'imported as the piece outline',
   construction: 'imported as construction geometry, with no meaning claimed',
   metadata: 'read as self-labelled metadata',
   skipped: 'not imported',
 };
 
-interface LayerObservation {
+export interface LayerObservation {
   readonly layer: string;
   readonly entity: string;
   readonly count: number;
   readonly treatment: LayerTreatment;
 }
+
+/** Stable presentation order: numeric-aware by layer, then entity kind. */
+const sortObservations = (
+  observations: readonly LayerObservation[],
+): readonly LayerObservation[] =>
+  [...observations].sort(
+    (a, b) =>
+      a.layer.localeCompare(b.layer, 'en', { numeric: true }) || a.entity.localeCompare(b.entity),
+  );
 
 /** Tallies observations into one row per (layer, entity, treatment). */
 const tally = (
@@ -322,9 +336,7 @@ const reportLayerUsage = (
   if (observations.length === 0) return;
 
   const bindings = layerMapFor(flavour);
-  const sorted = [...observations].sort(
-    (a, b) => a.layer.localeCompare(b.layer, 'en', { numeric: true }) || a.entity.localeCompare(b.entity),
-  );
+  const sorted = sortObservations(observations);
 
   issues.push({
     severity: 'info',
@@ -975,18 +987,44 @@ const buildPiece = (resolved: ResolvedPiece): PatternPiece => {
 
 const nowIso = (): string => new Date().toISOString();
 
+/** A layer observation plus what the (unverified) table says about that layer. */
+export interface LayerUsageRow extends LayerObservation {
+  /** Concept the table maps this layer to; null when the layer is unmapped. */
+  readonly concept: PatternConcept | null;
+  /**
+   * Whether the table lists this entity kind for this layer; null when the
+   * layer has no binding at all. `false` is the structured form of the
+   * `layer-entity-conflict` warning — same rule, same evidence.
+   */
+  readonly tableAgrees: boolean | null;
+}
+
+/** Everything one import produced: the document, and the account of itself. */
+export interface DxfImportResult {
+  readonly document: PatternDocument;
+  readonly issues: readonly ConversionIssue[];
+  /**
+   * Every (layer, entity kind) pair the file used and how each was treated —
+   * the structured form of the `layer-usage` diagnostic, in the same stable
+   * order. This is what an import UI should render its support summary from;
+   * parsing the diagnostic's message string back apart would be the fragile
+   * version of the same information.
+   */
+  readonly layers: readonly LayerUsageRow[];
+}
+
 /**
  * Full import with diagnostics — the richer sibling of `importDxf`.
  *
  * `FormatAdapter.deserialize` (the interface the format registry calls
  * through) can only return a bare `PatternDocument`, so `importDxf` below
  * exists for that contract; this is for anyone who wants the issues too —
- * today, `check-dxf-import.ts` and, later, an import dialog.
+ * today, `check-dxf-import.ts` and the import review dialog.
  */
 export const importDxfWithDiagnostics = (
   payload: string,
   options: DxfImportOptions,
-): { readonly document: PatternDocument; readonly issues: readonly ConversionIssue[] } => {
+): DxfImportResult => {
   const issues: ConversionIssue[] = [];
 
   let parsed: ParsedFile;
@@ -1110,7 +1148,17 @@ export const importDxfWithDiagnostics = (
     ? issues.map((issue) => (issue.severity === 'warning' ? { ...issue, severity: 'error' as const } : issue))
     : issues;
 
-  return { document, issues: finalIssues };
+  const bindings = layerMapFor(options.flavour);
+  const layers = sortObservations([...observations.values()]).map((o): LayerUsageRow => {
+    const binding = bindings.find((b) => String(b.layer) === o.layer);
+    return {
+      ...o,
+      concept: binding?.concept ?? null,
+      tableAgrees: binding ? binding.entities.includes(o.entity) : null,
+    };
+  });
+
+  return { document, issues: finalIssues, layers };
 };
 
 /**

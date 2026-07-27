@@ -128,20 +128,35 @@ settle the three conflicts above, which no quantity of vendor files can.
 
 ## Trying it now
 
-The command palette has `Import DXF (AAMA/ASTM)` and `Export DXF (AAMA)`. Both
-are still marked `mock`, for the same reason on both sides but not the same
-one: export has no writer yet, and import has a real parser but no file
-picker wired up to hand it a payload. Both report their real plan/blockers —
-export runs the real validator against the open document; import reports
-`describeImportPlan`, which no longer claims there's no parser — rather than
-doing anything, which keeps the wiring exercised and the actual gap visible.
-`check-dxf-import.ts` is where the parser is actually exercised, against two
-real files, until it's reachable from the UI:
+**Import is a real workflow.** `Import DXF (AAMA/ASTM)…` in the command
+palette opens a file picker and parses the chosen file into a review session
+(`store/importStore.ts`): a dialog shows what would be imported, how every
+layer was treated (imported / kept-unclaimed / metadata / skipped, plus where
+the file contradicts the layer table), and the full diagnostic list — and
+only its Apply button replaces the open document. The session survives the
+apply; `Show last DXF import report` reopens it. The dialog renders from
+`DxfImportResult.layers`, the structured per-layer account the importer
+returns, not from re-parsing diagnostic strings.
+
+**Export is still `mock`**: it has no writer. The palette command runs the
+real validator against the open document and reports the blockers rather
+than doing anything.
+
+Two commands exercise the importer from the terminal:
 
 ```bash
 npm run check:dxf --workspace=apps/pds
 ```
 
-126 assertions. Expected values are transcribed by hand from each fixture's
-raw group codes and re-derived independently of `import.ts`, so a bug shared
-between the importer and its test still fails.
+131 assertions against both real fixtures. Expected values are transcribed by
+hand from each fixture's raw group codes and re-derived independently of
+`import.ts`, so a bug shared between the importer and its test still fails.
+
+```bash
+npm run report:dxf --workspace=apps/pds
+```
+
+The support matrix, live: per-fixture pieces/points/diagnostics, per-layer
+treatment with table agreement, and the layer table's evidence state per
+concept (verified / observed / contradicted / untested). Descriptive, not
+enforcing — the place to look first when a new real file arrives.

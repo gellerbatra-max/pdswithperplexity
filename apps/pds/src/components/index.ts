@@ -7,6 +7,7 @@ export { Field, FieldRow, Pair, Value, Toggle, EmptyState } from './Field';
 export { Icon } from './Icon';
 export type { IconName } from './Icon';
 export { IconButton } from './IconButton';
+export { ImportReviewDialog } from './ImportReviewDialog';
 export { InspectorPanel } from './InspectorPanel';
 export { PanelSection } from './PanelSection';
 export { SaveState } from './SaveState';

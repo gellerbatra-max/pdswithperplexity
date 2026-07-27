@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { hydrateFromAutosave, useHistoryStore, useUiStore } from '@/store';
 import { CommandPalette } from './CommandPalette';
 import { ContextPanel } from './ContextPanel';
+import { ImportReviewDialog } from './ImportReviewDialog';
 import { InspectorPanel } from './InspectorPanel';
 import { StageArea } from './StageArea';
 import { StatusBar } from './StatusBar';
@@ -45,6 +46,7 @@ export const AppShell = () => {
       </div>
       <StatusBar />
       <CommandPalette />
+      <ImportReviewDialog />
     </div>
   );
 };

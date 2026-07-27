@@ -4,6 +4,7 @@ import {
   importDxf,
   importDxfWithDiagnostics,
   describeImportPlan,
+  type LayerUsageRow,
 } from '../src/io/dxf/import.ts';
 import { jsonAdapter } from '../src/io/json.ts';
 import { FormatParseError } from '../src/io/errors.ts';
@@ -720,6 +721,53 @@ for (const [blockName, rawLines] of Object.entries(TSHIRT_RAW_LINES)) {
     thrown = error;
   }
   check('importDxf does not throw on fixture 2 (warnings only, no errors)', thrown === null, String(thrown));
+}
+
+/* --- 23. The structured layers return, for both fixtures -------------------
+ *
+ * `layers` is the machine-readable form of the layer-usage diagnostic — what
+ * the import dialog renders its support table from. Locked as canonical rows
+ * so a change to treatment, count or table-agreement is a deliberate,
+ * test-visible act. Counts re-derive from the fixtures' own content: 87
+ * metadata TEXTs = 20 blocks × 4 Key:Value fields + 7 style fields; 344
+ * skipped = 431 layer-1 TEXTs − 87.
+ */
+
+{
+  const canonical = (rows: readonly LayerUsageRow[]): string =>
+    rows.map((r) => `${r.layer}|${r.entity}|${r.count}|${r.treatment}|${r.concept}|${r.tableAgrees}`).join('\n');
+
+  const fixture1 = importDxfWithDiagnostics(fixture, { flavour: 'aama', assumeUnit: 'mm' });
+  check(
+    'fixture 1 layers: one row — the boundary polylines, table agreeing',
+    canonical(fixture1.layers) === '1|POLYLINE|5|outline|piece-boundary|true',
+    canonical(fixture1.layers),
+  );
+
+  const expected2 = [
+    '1|POLYLINE|20|outline|piece-boundary|true',
+    '1|TEXT|87|metadata|piece-boundary|false',
+    '1|TEXT|344|skipped|piece-boundary|false',
+    '5|LINE|20|construction|grade-reference|false',
+    '7|LINE|20|construction|grain-line|true',
+    '15|TEXT|20|skipped|sew-line|false',
+  ].join('\n');
+  check('fixture 2 layers: six rows, treatments and table agreement as reviewed', canonical(tshirtResult.layers) === expected2, canonical(tshirtResult.layers));
+
+  const again = importDxfWithDiagnostics(tshirt, { flavour: 'aama', assumeUnit: 'mm' });
+  check('layers are deterministic across re-imports', canonical(again.layers) === canonical(tshirtResult.layers), 'ok');
+
+  check(
+    'every table disagreement in layers has a matching layer-entity-conflict diagnostic',
+    tshirtResult.layers
+      .filter((r) => r.tableAgrees === false)
+      .every((r) =>
+        tshirtResult.issues.some(
+          (i) => i.code === 'layer-entity-conflict' && i.message.includes(`Layer "${r.layer}"`) && i.message.includes(`puts ${r.entity} there`),
+        ),
+      ),
+    'ok',
+  );
 }
 
 console.log(failures === 0 ? '\nAll DXF import checks passed.' : `\n${failures} DXF import check(s) FAILED.`);

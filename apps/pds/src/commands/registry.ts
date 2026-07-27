@@ -11,6 +11,7 @@ import {
   useDocumentStore,
   useGradeStore,
   useHistoryStore,
+  useImportStore,
   useSelectionStore,
   useUiStore,
   useViewportStore,
@@ -356,24 +357,33 @@ const fileCommands: readonly Command[] = [
   },
   {
     id: 'file.import.dxf',
-    title: 'Import DXF (AAMA/ASTM)',
+    title: 'Import DXF (AAMA/ASTM)…',
     group: 'file',
     icon: 'folder',
-    status: 'mock',
+    status: 'ready',
     keywords: ['dxf', 'aama', 'astm', 'import', 'open', 'cad', 'accumark'],
     /*
-     * Still mock: there is no file picker wired to this command, so it has
-     * nothing to hand `Dxf.importDxf` — a real parser exists now (see
-     * io/dxf/import.ts), it is just not reachable from here yet. This
-     * reports the plan rather than inventing a document, same as before.
+     * The real workflow: pick a file, parse it with full diagnostics, review
+     * what the parser says about it in the import dialog, then apply or
+     * discard. The document store is only touched on apply — see
+     * store/importStore.ts.
      */
-    run: () => {
-      const plan = Dxf.describeImportPlan('aama');
-      ui().notify(
-        `${plan.label}: ${plan.steps.length}-step import over ${plan.layersRead} mapped layers — ` +
-          `parser exists, no file picker wired up yet (${plan.layersUnverified} of ${plan.layersRead} layer bindings unverified)`,
-      );
-    },
+    run: () => useImportStore.getState().pickDxfFile(),
+  },
+  {
+    id: 'file.import.dxf.report',
+    title: 'Show last DXF import report',
+    group: 'file',
+    icon: 'review',
+    status: 'ready',
+    keywords: ['dxf', 'import', 'report', 'diagnostics', 'issues', 'layers'],
+    /*
+     * The session outlives the apply so "what did that import actually read,
+     * skip and warn about?" stays answerable after the dialog closes — the
+     * question usually arrives later, when a piece looks wrong on the stage.
+     */
+    isEnabled: () => useImportStore.getState().session !== null,
+    run: () => useImportStore.getState().openDialog(),
   },
   {
     id: 'file.export.dxf',

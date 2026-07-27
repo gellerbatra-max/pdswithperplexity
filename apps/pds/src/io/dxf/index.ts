@@ -36,8 +36,15 @@ const dxfAdapter = (
 export const aamaAdapter = dxfAdapter('dxf-aama', 'DXF (AAMA)', 'aama');
 export const astmAdapter = dxfAdapter('astm', 'DXF (ASTM)', 'astm');
 
-export { importDxf, describeImportPlan } from './import';
-export type { ImportPlan, ImportPlanStep } from './import';
+export { importDxf, importDxfWithDiagnostics, describeImportPlan, TREATMENT_LABEL } from './import';
+export type {
+  ImportPlan,
+  ImportPlanStep,
+  DxfImportResult,
+  LayerObservation,
+  LayerUsageRow,
+  LayerTreatment,
+} from './import';
 export { exportDxf, describeExportPlan } from './export';
 export type { ExportPlan } from './export';
 export {
