@@ -5,5 +5,10 @@ dist/
 *.tsbuildinfo
 .vite/
 
+# iCloud Drive and Dropbox resolve sync conflicts by appending " 2", " 3", …
+# before the extension. Three such copies of Step 5 files reached a commit
+# before this rule existed. Narrow to "* 2.*" if a real filename ever collides.
+* [0-9].*
+
 # Per-user Claude Code settings; launch.json is shared.
 .claude/settings.local.json
