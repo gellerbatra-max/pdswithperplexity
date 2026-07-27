@@ -2,6 +2,8 @@ import type Konva from 'konva';
 import { orientedGeometry, translate } from '@/marker/pieceGeometry';
 import type { MarkerDocument, PlacedPiece, Point } from '@/marker/schema';
 import { boundsOf, bufferFor, expand, overlaps, type Bounds } from '../collision/aabb';
+import { convexPartsOf } from '../collision/convexParts';
+import { orientPoints } from '../collision/orient';
 import { satCollision } from '../collision/sat';
 import type { MarkerTransform } from '../types';
 
@@ -22,7 +24,12 @@ import type { MarkerTransform } from '../types';
 const MAX_RESOLUTION_PASSES = 8;
 
 export interface Obstacle {
-  readonly polygon: Point[];
+  /**
+   * Convex parts, not the outline. SAT is only sound on convex polygons, and
+   * a concave piece tested whole reports collisions across its own hollow.
+   */
+  readonly parts: Point[][];
+  /** Over the whole outline, for the broad phase. */
   readonly bounds: Bounds;
 }
 
@@ -33,7 +40,10 @@ const rectangle = (x: number, y: number, width: number, height: number): Point[]
   { x, y: y + height },
 ];
 
-const toObstacle = (polygon: Point[]): Obstacle => ({ polygon, bounds: boundsOf(polygon) });
+const toObstacle = (parts: Point[][]): Obstacle => ({
+  parts,
+  bounds: boundsOf(parts.flat()),
+});
 
 /**
  * The solid things a dragged piece must not overlap: other placed pieces and
@@ -51,11 +61,15 @@ export const obstaclesFor = (document: MarkerDocument, excludePieceId: string): 
 
   for (const piece of document.pieces) {
     if (piece.id === excludePieceId) continue;
-    obstacles.push(toObstacle(translate(orientedGeometry(piece), piece.position)));
+    const parts = convexPartsOf(piece.geometry).map((part) =>
+      translate(orientPoints(part, piece), piece.position),
+    );
+    obstacles.push(toObstacle(parts));
   }
 
   for (const zone of document.defectZones) {
-    obstacles.push(toObstacle(rectangle(zone.x, zone.y, zone.width, zone.height)));
+    // Already convex.
+    obstacles.push(toObstacle([rectangle(zone.x, zone.y, zone.width, zone.height)]));
   }
 
   return obstacles;
@@ -122,6 +136,37 @@ const constrain = (
   );
 
 /**
+ * The worst overlap between any mover part and any obstacle part.
+ *
+ * Deepest rather than first: with a concave piece straddling two parts of an
+ * obstacle, clearing the shallower one first can leave the piece wedged and
+ * burn a resolution pass for nothing.
+ */
+const deepestOverlap = (
+  moverParts: readonly Point[][],
+  position: Point,
+  obstacle: Obstacle,
+): Point | null => {
+  let deepest: Point | null = null;
+  let deepestDepth = 0;
+
+  for (const part of moverParts) {
+    const moved = translate(part, position);
+    for (const obstaclePart of obstacle.parts) {
+      const result = satCollision(moved, obstaclePart);
+      if (!result.collides || !result.mtv) continue;
+      const depth = Math.hypot(result.mtv.x, result.mtv.y);
+      if (depth > deepestDepth) {
+        deepestDepth = depth;
+        deepest = result.mtv;
+      }
+    }
+  }
+
+  return deepest;
+};
+
+/**
  * Where a dragged piece actually lands.
  *
  * Takes the position the pointer asked for and returns the nearest legal one:
@@ -139,30 +184,30 @@ export const resolveDragPosition = (
   const buffer = bufferFor(piece.bufferOverride, document.cutterBuffer);
   const obstacles = obstaclesFor(document, piece.id);
 
+  // Split and orient once: rotation cannot change mid-drag, so only the
+  // translation is recomputed per pass.
+  const moverParts = convexPartsOf(piece.geometry).map((part) => orientPoints(part, piece));
+
   let position = constrain(orientedBounds, proposed, document);
 
   for (let pass = 0; pass < MAX_RESOLUTION_PASSES; pass += 1) {
-    const polygon = translate(oriented, position);
-    const searchBounds = expand(boundsOf(polygon), buffer);
+    const searchBounds = expand(boundsOf(translate(oriented, position)), buffer);
 
     let pushed = false;
     for (const obstacle of obstacles) {
       if (!overlaps(searchBounds, obstacle.bounds)) continue;
 
-      const result = satCollision(polygon, obstacle.polygon);
-      if (!result.collides || !result.mtv) continue;
+      const hit = deepestOverlap(moverParts, position, obstacle);
+      if (!hit) continue;
 
-      const depth = Math.hypot(result.mtv.x, result.mtv.y);
+      const depth = Math.hypot(hit.x, hit.y);
       if (depth === 0) continue;
 
       // Push clear of the overlap, then the buffer further along the same
       // axis. Offsetting the polygon itself would be exact, but that needs a
       // real inset/outset and this is a drag loop.
       const scale = (depth + buffer) / depth;
-      position = {
-        x: position.x + result.mtv.x * scale,
-        y: position.y + result.mtv.y * scale,
-      };
+      position = { x: position.x + hit.x * scale, y: position.y + hit.y * scale };
       pushed = true;
       break;
     }

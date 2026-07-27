@@ -44,11 +44,11 @@ const doc = (pieces: PlacedPiece[], cutterBuffer: 0 | 0.3 | 0.5 | 1 = 0): Marker
   updatedAt: '2026-01-01T00:00:00.000Z',
 });
 
-/** True when the moved piece is clear of every obstacle in the document. */
+/** True when the moved piece is clear of every convex part of every obstacle. */
 const isClear = (document: MarkerDocument, moved: PlacedPiece, at: Point): boolean => {
   const polygon = placedGeometry({ ...moved, position: at });
-  return obstaclesFor(document, moved.id).every(
-    (obstacle) => !satCollision(polygon, obstacle.polygon).collides,
+  return obstaclesFor(document, moved.id).every((obstacle) =>
+    obstacle.parts.every((part) => !satCollision(polygon, part).collides),
   );
 };
 

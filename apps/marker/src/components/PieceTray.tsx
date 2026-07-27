@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { nextPlaceable, trayGroups } from '@/marker/tray';
 import { useMarkerStore } from '@/store/markerStore';
 import { useUiStore } from '@/store/uiStore';
@@ -9,14 +10,34 @@ import { useUiStore } from '@/store/uiStore';
  * point. Clicking places at the origin, which is what the spec asks for, but
  * it does mean the piece lands on top of whatever is already there.
  */
+
+/**
+ * Rows rendered at once.
+ *
+ * A 50,000-piece import measured a 6.7 second main-thread freeze building the
+ * DOM for every row — far longer than the parse it followed. This is a cap,
+ * not a fix: the real answer is a windowed list that renders only what the
+ * scroll position needs.
+ *
+ * TODO(step-9): virtualise, and drop the cap.
+ */
+const MAX_VISIBLE_ROWS = 200;
+
 export const PieceTray = () => {
-  const document = useMarkerStore((state) => state.document);
+  const trayPieces = useMarkerStore((state) => state.document?.trayPieces);
   const placeFromTray = useMarkerStore((state) => state.placeFromTray);
   const setStatus = useUiStore((state) => state.setStatus);
 
-  if (!document) return <aside className="tray" />;
+  // This component re-renders on every store change, including each drag
+  // commit. Regrouping the whole tray that often is what makes a large import
+  // feel slow long after it finished.
+  const groups = useMemo(
+    () => (trayPieces ? trayGroups({ trayPieces }) : []),
+    [trayPieces],
+  );
+  const visible = groups.slice(0, MAX_VISIBLE_ROWS);
 
-  const groups = trayGroups(document);
+  if (!trayPieces) return <aside className="tray" />;
 
   return (
     <aside className="tray">
@@ -29,7 +50,7 @@ export const PieceTray = () => {
         {groups.length === 0 ? (
           <p className="tray__empty">No pieces imported yet.</p>
         ) : (
-          groups.map((group) => {
+          visible.map((group) => {
             const remaining = group.quantity - group.placed;
             return (
               <button
@@ -61,6 +82,12 @@ export const PieceTray = () => {
             );
           })
         )}
+
+        {groups.length > visible.length ? (
+          <p className="tray__empty">
+            Showing {visible.length} of {groups.length} rows.
+          </p>
+        ) : null}
       </div>
     </aside>
   );

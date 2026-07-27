@@ -6,7 +6,7 @@
  * React and no store.
  */
 
-import type { MarkerDocument, TrayPiece } from './schema';
+import type { TrayPiece } from './schema';
 
 export interface TrayGroup {
   /** Stable across renders: the grouping key itself. */
@@ -23,10 +23,14 @@ export interface TrayGroup {
 const keyOf = (piece: TrayPiece): string =>
   `${piece.name} ${piece.size} ${piece.fabricCode}`;
 
-export const trayGroups = (document: MarkerDocument): TrayGroup[] => {
+/**
+ * Takes just the tray rather than the whole document, so a caller can memoise
+ * on `trayPieces` alone — the tray does not change when a piece is dragged.
+ */
+export const trayGroups = (source: { readonly trayPieces: readonly TrayPiece[] }): TrayGroup[] => {
   const groups = new Map<string, TrayGroup>();
 
-  for (const piece of document.trayPieces) {
+  for (const piece of source.trayPieces) {
     const key = keyOf(piece);
     const existing = groups.get(key);
     if (existing) {

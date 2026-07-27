@@ -1,5 +1,12 @@
 import { create } from 'zustand';
-import type { DefectZone, MarkerDocument, PlacedPiece, Point, SpliceLine } from '@/marker/schema';
+import type {
+  DefectZone,
+  MarkerDocument,
+  PlacedPiece,
+  Point,
+  SpliceLine,
+  TrayPiece,
+} from '@/marker/schema';
 
 /**
  * The open marker document, plus its undo history.
@@ -34,6 +41,8 @@ export interface MarkerState {
   updateSettings: (patch: Partial<MarkerSettings>) => void;
   /** Instantiate one tray piece onto the marker and count it as placed. */
   placeFromTray: (trayPieceId: string, position: Point) => void;
+  /** Add imported pieces to the tray, leaving placed pieces untouched. */
+  addTrayPieces: (pieces: readonly TrayPiece[]) => void;
   addDefectZone: (zone: DefectZone) => void;
   addSpliceLine: (line: SpliceLine) => void;
   undo: () => void;
@@ -132,6 +141,19 @@ export const useMarkerStore = create<MarkerState>((set) => ({
               : candidate,
           ),
         };
+      }),
+    ),
+
+  addTrayPieces: (pieces) =>
+    set((state) =>
+      edit(state, (document) => {
+        if (pieces.length === 0) return document;
+        // Ids come from the file; a re-import of the same file must not create
+        // a second copy of every piece.
+        const known = new Set(document.trayPieces.map((piece) => piece.id));
+        const fresh = pieces.filter((piece) => !known.has(piece.id));
+        if (fresh.length === 0) return document;
+        return { ...document, trayPieces: [...document.trayPieces, ...fresh] };
       }),
     ),
 
