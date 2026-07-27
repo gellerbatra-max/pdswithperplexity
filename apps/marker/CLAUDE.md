@@ -36,7 +36,7 @@ modify it. Study its patterns and follow them.
 | vite | 7.3.6 | 7.1.0 has high-severity CVEs (path traversal, server.fs.deny bypass); 7.3.6 is the fixed resolved version |
 | typescript | 5.9.3 | 5.9.0 was never published stable; 5.9.3 is the first stable 5.9.x |
 | @vitejs/plugin-react | 5.0.0 | per spec |
-| vitest | 3.2.4 | devDependency, add in Step 1 |
+| vitest | 3.2.7 | 3.2.4 fails the audit gate; use the fixed version |
 
 All packages in the `dependencies` block must be pinned exact — no `^` or `~`.
 `devDependencies` may use `~` for patch-level flexibility only.
@@ -214,7 +214,7 @@ export interface ComparisonLayer {
   opacity: number               // 0–1
   offsetX: number
   offsetY: number
-  visible: boolean
+ visible: boolean
 }
 ```
 
@@ -565,7 +565,7 @@ After ALL verify checks for a step pass, run this exact command
 before saying "Step [N] complete ✓":
 
 ```bash
-git add apps/marker
+git add apps/marker package-lock.json
 git commit -m "feat(marker): step [N] — [short description]"
 ```
 
@@ -578,6 +578,7 @@ Examples:
 **Never leave a completed step uncommitted.**
 If a verify check fails, fix it first — do not commit broken state.
 Do NOT push unless I ask. Commit locally only.
+If working on a branch, that is fine. Merge to `main` after the step is approved.
 
 ---
 
