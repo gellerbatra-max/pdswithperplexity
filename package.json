@@ -14,6 +14,8 @@
     "check:offset": "npm run check:offset --workspace apps/pds",
     "check:curve": "npm run check:curve --workspace apps/pds",
     "check": "npm run check --workspace apps/pds",
-    "check:roundtrip": "npm run check:roundtrip --workspace apps/pds"
+    "check:roundtrip": "npm run check:roundtrip --workspace apps/pds",
+    "check:grading": "npm run check:grading --workspace apps/pds",
+    "check:dxf": "npm run check:dxf --workspace apps/pds"
   }
 }

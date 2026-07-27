@@ -845,6 +845,33 @@
   -webkit-appearance: none;
 }
 
+/* A grade rule's code and label, editable inline in the rule library list. */
+.grade-rule-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 2px 0;
+}
+
+.grade-rule-row__code,
+.grade-rule-row__label {
+  min-width: 0;
+}
+
+.grade-rule-row__code {
+  flex: 0 0 52px;
+}
+
+.grade-rule-row__label {
+  flex: 1;
+}
+
+.grade-rule-row__code .value,
+.grade-rule-row__label .value {
+  width: 100%;
+}
+
 .toggle--interactive {
   cursor: pointer;
 }

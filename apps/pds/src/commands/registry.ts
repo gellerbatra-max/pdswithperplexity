@@ -2,14 +2,19 @@ import { WORKSPACES } from '@/features';
 import { Dxf } from '@/io';
 import {
   createEmptyDocument,
+  createGradeRule,
   createSeedDocument,
   flushAutosave,
+  nextDraftGradeRuleName,
   pieceRef,
+  setPointsGradeRule,
   useDocumentStore,
+  useGradeStore,
   useHistoryStore,
   useSelectionStore,
   useUiStore,
   useViewportStore,
+  type SelectionRef,
 } from '@/store';
 import type { Command, CommandGroup } from './types';
 
@@ -33,6 +38,7 @@ const ui = () => useUiStore.getState();
 const doc = () => useDocumentStore.getState();
 const view = () => useViewportStore.getState();
 const selection = () => useSelectionStore.getState();
+const grade = () => useGradeStore.getState();
 
 /** Mock commands report back instead of silently doing nothing. */
 const mock = (message: string) => (): void => ui().notify(message);
@@ -228,41 +234,68 @@ const designCommands: readonly Command[] = [
 
 const gradeCommands: readonly Command[] = [
   {
-    id: 'grade.size-chart',
-    title: 'Create size chart',
-    group: 'grade',
-    icon: 'grade',
-    status: 'mock',
-    keywords: ['sizes', 'range', 'chart'],
-    run: mock('Create size chart — the grading engine is not built yet'),
-  },
-  {
     id: 'grade.rule.add',
     title: 'Add grade rule',
     group: 'grade',
     icon: 'grade',
-    status: 'mock',
+    status: 'ready',
     keywords: ['increment', 'xy', 'rule'],
-    run: mock('Add grade rule — the grading engine is not built yet'),
+    run: () => {
+      const draft = nextDraftGradeRuleName();
+      createGradeRule(draft.code, draft.label);
+      ui().notify(`Added grade rule ${draft.code}`);
+    },
   },
   {
     id: 'grade.nest',
-    title: 'Nest graded sizes',
+    title: 'Toggle nested size stack',
     group: 'grade',
     icon: 'layers',
-    status: 'mock',
+    status: 'ready',
     keywords: ['overlay', 'stack', 'sizes'],
-    run: mock('Nest graded sizes — the grading engine is not built yet'),
+    run: () => {
+      grade().toggleNest();
+      ui().notify(grade().nestVisible ? 'Nest shown' : 'Nest hidden');
+    },
   },
   {
     id: 'grade.rule.copy',
-    title: 'Copy grade rules to selection',
+    title: "Copy the active point's grade rule to the rest of the selection",
     group: 'grade',
     icon: 'piece',
-    status: 'mock',
+    status: 'ready',
     keywords: ['apply', 'paste', 'rules'],
-    isEnabled: () => selection().selection.length > 0,
-    run: mock('Copy grade rules — the grading engine is not built yet'),
+    isEnabled: () => selection().primary?.kind === 'point' && selection().selection.length > 1,
+    run: () => {
+      const sel = selection();
+      if (sel.primary?.kind !== 'point') return;
+      const source = sel.primary;
+
+      const sourcePiece = doc().document.pieces.find((p) => p.id === source.pieceId);
+      const sourcePoint = sourcePiece?.points.find((p) => p.id === source.pointId);
+      const ruleId = sourcePoint?.gradeRuleId;
+      if (!ruleId) {
+        ui().notify('The active point has no grade rule to copy');
+        return;
+      }
+
+      const targets = sel.selection.filter(
+        (ref): ref is Extract<SelectionRef, { kind: 'point' }> =>
+          ref.kind === 'point' && !(ref.pieceId === source.pieceId && ref.pointId === source.pointId),
+      );
+      const byPiece = new Map<string, string[]>();
+      for (const ref of targets) {
+        byPiece.set(ref.pieceId, [...(byPiece.get(ref.pieceId) ?? []), ref.pointId]);
+      }
+      for (const [pieceId, pointIds] of byPiece) {
+        setPointsGradeRule(pieceId, pointIds, ruleId);
+      }
+      ui().notify(
+        targets.length === 0
+          ? 'Nothing else selected to copy the rule to'
+          : `Copied grade rule to ${targets.length} point${targets.length === 1 ? '' : 's'}`,
+      );
+    },
   },
 ];
 
@@ -329,15 +362,16 @@ const fileCommands: readonly Command[] = [
     status: 'mock',
     keywords: ['dxf', 'aama', 'astm', 'import', 'open', 'cad', 'accumark'],
     /*
-     * Mock import. Deliberately does not read a file or invent a document:
-     * it walks the real scaffolding and reports what an import would do, so the
-     * wiring is exercised and the gap is visible rather than papered over.
+     * Still mock: there is no file picker wired to this command, so it has
+     * nothing to hand `Dxf.importDxf` — a real parser exists now (see
+     * io/dxf/import.ts), it is just not reachable from here yet. This
+     * reports the plan rather than inventing a document, same as before.
      */
     run: () => {
       const plan = Dxf.describeImportPlan('aama');
       ui().notify(
         `${plan.label}: ${plan.steps.length}-step import over ${plan.layersRead} mapped layers — ` +
-          `blocked (${plan.layersUnverified} layer bindings unverified, no parser)`,
+          `parser exists, no file picker wired up yet (${plan.layersUnverified} of ${plan.layersRead} layer bindings unverified)`,
       );
     },
   },

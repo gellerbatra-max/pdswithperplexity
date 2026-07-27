@@ -90,11 +90,12 @@ export type {
   SizeRange,
   GradeIncrement,
   GradeRule,
+  GradeDiagnostic,
 } from './grading';
 export { findIncrement } from './grading';
 
 export type { NestedSize, GradeVector } from './nest';
-export { gradePiece, nestPiece, gradeVectors, pointDelta } from './nest';
+export { gradePiece, nestPiece, gradeVectors, pointDelta, gradeDiagnostics } from './nest';
 
 export type {
   MeasurementKind,
@@ -102,7 +103,12 @@ export type {
   MeasurementLink,
 } from './measurement';
 export type { MeasurementResult } from './measure';
-export { evaluateMeasurement, evaluateMeasurements } from './measure';
+export {
+  evaluateMeasurement,
+  evaluateMeasurements,
+  evaluateMeasurementAtSize,
+  evaluateMeasurementsAtSize,
+} from './measure';
 
 export type { StyleInfo, PatternDocument } from './document';
 export { PATTERN_SCHEMA_VERSION } from './document';

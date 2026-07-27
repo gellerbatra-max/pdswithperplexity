@@ -1,13 +1,13 @@
-import { Icon, type IconName } from '@/components/Icon';
-import { findPiece, findPoint, pointDelta } from '@/pattern';
+import { Icon } from '@/components/Icon';
+import { findPiece, findPoint, gradeDiagnostics, pointDelta, type GradeDiagnostic, type PatternPiece, type PointId } from '@/pattern';
 import { useDocumentStore, useGradeStore, useSelectionStore } from '@/store';
-import type { Severity } from '@/diagnostics';
-import { anomaliesFor } from './mockData';
+import { SEVERITY_ICON } from './severity';
 
-const SEVERITY_ICON: Record<Severity, IconName> = {
-  error: 'review',
-  warning: 'grade',
-  info: 'clock',
+/** True when a diagnostic's segment has this point as one of its ends. */
+const touchesPoint = (diagnostic: GradeDiagnostic, piece: PatternPiece, pointId: PointId): boolean => {
+  if (!diagnostic.segmentId) return false;
+  const segment = piece.segments.find((s) => s.id === diagnostic.segmentId);
+  return segment !== undefined && (segment.from === pointId || segment.to === pointId);
 };
 
 /**
@@ -34,7 +34,13 @@ export const GradeDrawer = () => {
     piece && primary?.kind === 'point' ? findPoint(piece, primary.pointId) : undefined;
 
   const sizes = [...document.sizeRange.sizes].sort((a, b) => a.order - b.order);
-  const anomalies = anomaliesFor(piece?.id ?? null, point?.id ?? null);
+  const anomalies = piece
+    ? point
+      ? [...gradeDiagnostics(document, piece.id)].sort(
+          (a, b) => Number(touchesPoint(b, piece, point.id)) - Number(touchesPoint(a, piece, point.id)),
+        )
+      : gradeDiagnostics(document, piece.id)
+    : gradeDiagnostics(document);
 
   const subject = point
     ? `${piece?.name ?? ''} · ${point.label ?? point.role}`
@@ -130,7 +136,7 @@ export const GradeDrawer = () => {
                 <span
                   className="chip"
                   data-severity={anomaly.severity}
-                  data-scoped={anomaly.pointId === point?.id || undefined}
+                  data-scoped={(piece && point && touchesPoint(anomaly, piece, point.id)) || undefined}
                   title={anomaly.detail}
                 >
                   <Icon name={SEVERITY_ICON[anomaly.severity]} size={11} />

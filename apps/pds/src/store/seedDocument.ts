@@ -98,6 +98,8 @@ interface PieceSpec {
     readonly x: number;
     readonly y: number;
     readonly label: string;
+    /** Ungraded (the default) holds the anchor at its base position across every size. */
+    readonly gradeRuleId?: string;
   }[];
   readonly internals?: readonly {
     readonly role: InternalLine['role'];
@@ -221,6 +223,7 @@ const buildPiece = (spec: PieceSpec): PatternPiece => {
       position: { x: spec.origin.x + anchor.x, y: spec.origin.y + anchor.y },
       role: 'construction',
       label: anchor.label,
+      ...(anchor.gradeRuleId ? { gradeRuleId: anchor.gradeRuleId } : {}),
     });
   }
 
@@ -306,11 +309,16 @@ const SPECS: readonly PieceSpec[] = [
     seamAllowance: 10,
     meta: shell('SH-FR-L', 1, { mirrored: true }),
     grain: { x: 120, y1: 90, y2: 620 },
+    // Graded on the same rule as the outline points at the same body level
+    // (`chest-side`/`waist-side` land exactly on outline points 5 and 6,
+    // both `gr-1`) — without a rule these measurement anchors would hold
+    // their base position forever, and "chest" would report the same number
+    // at every size.
     anchors: [
-      { key: 'chest-cf', x: 0, y: 210, label: 'Chest level CF' },
-      { key: 'chest-side', x: 220, y: 210, label: 'Chest level side' },
-      { key: 'waist-cf', x: 0, y: 470, label: 'Waist level CF' },
-      { key: 'waist-side', x: 232, y: 470, label: 'Waist level side' },
+      { key: 'chest-cf', x: 0, y: 210, label: 'Chest level CF', gradeRuleId: 'gr-1' },
+      { key: 'chest-side', x: 220, y: 210, label: 'Chest level side', gradeRuleId: 'gr-1' },
+      { key: 'waist-cf', x: 0, y: 470, label: 'Waist level CF', gradeRuleId: 'gr-1' },
+      { key: 'waist-side', x: 232, y: 470, label: 'Waist level side', gradeRuleId: 'gr-1' },
     ],
     outline: [
       [0, 0, 'corner', 'gr-6', 'CF neck'],
@@ -387,11 +395,13 @@ const SPECS: readonly PieceSpec[] = [
     seamAllowance: 10,
     meta: shell('SH-BK', 1, { onFold: true }),
     grain: { x: 140, y1: 100, y2: 640 },
+    // Same reasoning as Front Left: `chest-side`/`waist-side` land exactly on
+    // outline points 5 and 6, both `gr-1`.
     anchors: [
-      { key: 'chest-cb', x: 0, y: 236, label: 'Chest level CB' },
-      { key: 'chest-side', x: 262, y: 236, label: 'Chest level side' },
-      { key: 'waist-cb', x: 0, y: 480, label: 'Waist level CB' },
-      { key: 'waist-side', x: 274, y: 480, label: 'Waist level side' },
+      { key: 'chest-cb', x: 0, y: 236, label: 'Chest level CB', gradeRuleId: 'gr-1' },
+      { key: 'chest-side', x: 262, y: 236, label: 'Chest level side', gradeRuleId: 'gr-1' },
+      { key: 'waist-cb', x: 0, y: 480, label: 'Waist level CB', gradeRuleId: 'gr-1' },
+      { key: 'waist-side', x: 274, y: 480, label: 'Waist level side', gradeRuleId: 'gr-1' },
     ],
     outline: [
       [0, 40, 'corner', 'gr-6', 'CB neck'],

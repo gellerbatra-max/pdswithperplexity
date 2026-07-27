@@ -4,7 +4,18 @@ import { GradeDrawer } from './GradeDrawer';
 import { GradePanel } from './GradePanel';
 import { GradeStage } from './GradeStage';
 
-/** Size development: grade points, grade rules, size charts, nested-size review. */
+/**
+ * Size development: grade rules, per-point assignment, nested-size review.
+ *
+ * The dock lists only `select` because nothing else here is a distinct
+ * *canvas* tool — picking a grade point on the stage already works through
+ * it (`CanvasStage`'s per-workspace pickable kinds), and assigning or editing
+ * a rule happens in the context panel and inspector, the same way every other
+ * non-shape-changing edit in this app is a panel field rather than a tool
+ * mode. A size chart editor (adding, removing, reordering sizes) is a real,
+ * separate gap — see DEVELOPMENT.md — and does not get a placeholder entry
+ * here now that this dock only lists what actually does something.
+ */
 export const gradeWorkspace: WorkspaceModule = {
   id: 'grade',
   title: 'Grade',
@@ -16,10 +27,5 @@ export const gradeWorkspace: WorkspaceModule = {
   Drawer: GradeDrawer,
   tools: [
     { id: 'select', icon: 'cursor', label: 'Select', hint: 'Pick pieces and grade points', status: 'available', shortcut: 'V' },
-    { id: 'grade-point', icon: 'target', label: 'Grade point', hint: 'Mark a graded node', status: 'planned' },
-    { id: 'grade-rule', icon: 'table', label: 'Grade rule', hint: 'Assign X/Y increments', status: 'planned' },
-    { id: 'size-chart', icon: 'library', label: 'Size chart', hint: 'Define the size range', status: 'planned' },
-    { id: 'nest', icon: 'layers', label: 'Nest sizes', hint: 'Overlay all graded sizes', status: 'planned' },
-    { id: 'alteration', icon: 'table', label: 'Alteration table', hint: 'Per-size adjustments', status: 'planned' },
   ],
 };

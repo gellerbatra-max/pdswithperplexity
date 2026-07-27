@@ -1,21 +1,48 @@
 import type { Vec2 } from '@/geometry';
-import { findIncrement, type GradeRule, type SizeRange } from './grading';
-import type { SizeId } from './ids';
+import { findIncrement, type GradeDiagnostic, type GradeRule, type SizeRange } from './grading';
+import type { PieceId, SizeId } from './ids';
+import type { PatternDocument } from './document';
 import type { PatternPiece, PiecePoint, PieceSegment } from './piece';
+import { segmentLength } from './resolve';
 
 /**
- * Mock grading: apply each point's grade rule as a plain translation.
+ * Grading: point-and-rule propagation over a piece.
  *
- * This is deliberately not correct grading. A real grader moves points along
- * construction lines, keeps curves smooth through the nest, and preserves seam
- * lengths between mating pieces — none of that happens here. What this gives is
- * a nest with the right *shape of data* so the interaction model, the overlay
- * and the inspector can be built and exercised before the solver exists.
+ * Every outline, construction and grain point that carries a `gradeRuleId`
+ * moves by that rule's increment for the requested size; everything else
+ * holds its base position. That is the whole model — it is what apparel
+ * grading actually is (a "grade rule table" of per-point X/Y increments is
+ * the standard technique real CAD systems use, not a simplification of one),
+ * so this file does not pretend to be a constraint solver. What it *was*
+ * missing, and now is not:
  *
- * TODO(grading-math): replace `buildGraded` with a real solver — move points
- * along their construction lines, re-fit curves through the nest rather than
- * translating control handles, and keep mating seam lengths equal across sizes.
- * The public surface (gradePiece / nestPiece / gradeVectors) should not change.
+ * - Cubic handles moved by the *average* of their two endpoints' deltas,
+ *   which is not how any other edit in this app moves a handle — everywhere
+ *   else, `control1` follows `from` and `control2` follows `to` (see
+ *   `pattern/edit.ts`'s `moveGeometry`). Averaging pivots the curve toward
+ *   whichever end graded less whenever the two ends carry different rules,
+ *   which is the ordinary case, not an edge case. Handles now follow their
+ *   own anchor, exactly like every other geometry edit in the kernel.
+ * - Arc segments were silently untouched — not wrong, since a fixed radius
+ *   while the endpoints move is a legitimate, common grading convention (the
+ *   curve keeps its own shape rather than scaling with the body), but
+ *   undocumented and unverified. That policy is now explicit below, and
+ *   `gradeDiagnostics` reports the one way it can go visibly wrong: a grade
+ *   aggressive enough to open the endpoints past twice the radius, which
+ *   forces `arcCentre`'s repair clamp and quietly turns a gentle bow into a
+ *   forced semicircle.
+ *
+ * What is still an approximation, stated rather than hidden: nothing here
+ * keeps two mating seams the same length across the range, or moves a point
+ * along a construction line instead of by a raw X/Y offset. `gradeDiagnostics`
+ * flags the first of those when it happens; neither is silently corrected.
+ *
+ * TODO(grading-solver): a real solver moves points along construction lines
+ * and re-fits curves through the nest instead of translating raw X/Y offsets,
+ * and reconciles `mateSegmentId` pairs so they grade to equal lengths instead
+ * of merely flagging when they don't. Keep the public surface — `gradePiece`,
+ * `nestPiece`, `gradeVectors`, `gradeDiagnostics` — so the overlay, drawer,
+ * inspector and diagnostics panel keep working while the internals change.
  * See DEVELOPMENT.md.
  */
 
@@ -54,22 +81,26 @@ const buildGraded = (
   });
 
   const segments: PieceSegment[] = piece.segments.map((segment) => {
+    // Arc geometry carries no absolute coordinates — radius, largeArc and
+    // clockwise describe the circle, not a position — so there is nothing
+    // here to translate. The endpoints move because the *points* moved
+    // above; the arc keeps its own radius through that, which is the stated
+    // policy this file documents rather than hides.
     if (segment.geometry.kind !== 'cubic') return segment;
 
-    // Control handles are absolute, so they have to move with their endpoints.
-    // Averaging the two endpoint deltas keeps the curve attached at both ends;
-    // a real solver would re-fit the curve instead.
     const from = deltas.get(segment.from) ?? ZERO;
     const to = deltas.get(segment.to) ?? ZERO;
-    const dx = (from.dx + to.dx) / 2;
-    const dy = (from.dy + to.dy) / 2;
 
+    // Each handle follows the endpoint it belongs to, exactly like a manual
+    // drag (`pattern/edit.ts`'s `moveGeometry`) — not an average of both
+    // endpoints' movement, which used to pivot the curve toward whichever
+    // side graded less.
     return {
       ...segment,
       geometry: {
         ...segment.geometry,
-        control1: translate(segment.geometry.control1, dx, dy),
-        control2: translate(segment.geometry.control2, dx, dy),
+        control1: translate(segment.geometry.control1, from.dx, from.dy),
+        control2: translate(segment.geometry.control2, to.dx, to.dy),
       },
     };
   });
@@ -167,4 +198,152 @@ export const gradeVectors = (
     });
   }
   return out;
+};
+
+/* --- Diagnostics -------------------------------------------------------- */
+
+/**
+ * How far apart, in millimetres, two mating seams may drift across a size
+ * before it is worth a flag. Not a tolerance the geometry is checked against
+ * elsewhere in this app — grading two independently-ruled pieces essentially
+ * never lands two seams on the exact same length, so a zero tolerance would
+ * flag every mated pair at every size. This is the threshold past which the
+ * mismatch is plausibly a cutting problem rather than rounding.
+ */
+const MATING_LENGTH_TOLERANCE_MM = 1;
+
+/** How far past `2 × radius` a graded chord may open before it is flagged. */
+const ARC_REPAIR_TOLERANCE_MM = 1e-6;
+
+const gradedSizes = (sizeRange: SizeRange): readonly { readonly id: SizeId; readonly label: string }[] =>
+  sizeRange.sizes.filter((size) => size.id !== sizeRange.baseSizeId);
+
+/**
+ * Arcs whose radius the stated grading policy could not honour.
+ *
+ * Holding an arc's radius constant while its endpoints grade is a real,
+ * deliberate policy (see the module doc above) — it only breaks down when a
+ * size grades the chord open past twice the radius, at which point
+ * `arcCentre` (in `curve.ts`) has to enlarge the effective radius just to
+ * reach both endpoints, silently turning a gentle bow into a forced
+ * semicircle. This reports exactly that case, for exactly the sizes it
+ * happens at, rather than leaving it for someone to notice on a cut piece.
+ */
+const arcRadiusDiagnostics = (
+  piece: PatternPiece,
+  rules: readonly GradeRule[],
+  sizeRange: SizeRange,
+): readonly GradeDiagnostic[] => {
+  const out: GradeDiagnostic[] = [];
+  const arcSegments = piece.segments.filter((s) => s.geometry.kind === 'arc');
+  if (arcSegments.length === 0) return out;
+
+  for (const size of gradedSizes(sizeRange)) {
+    const graded = gradePiece(piece, rules, size.id);
+    for (const segment of arcSegments) {
+      if (segment.geometry.kind !== 'arc') continue;
+      const gradedSegment = graded.segments.find((s) => s.id === segment.id);
+      const from = graded.points.find((p) => p.id === segment.from);
+      const to = graded.points.find((p) => p.id === segment.to);
+      if (!gradedSegment || gradedSegment.geometry.kind !== 'arc' || !from || !to) continue;
+
+      const chord = Math.hypot(to.position.x - from.position.x, to.position.y - from.position.y);
+      const radius = Math.abs(gradedSegment.geometry.radius);
+      if (chord / 2 <= radius + ARC_REPAIR_TOLERANCE_MM) continue;
+
+      out.push({
+        id: `grade-arc-repair:${piece.id}:${segment.id}:${size.id}`,
+        severity: 'warning',
+        code: 'grade-arc-repair',
+        label: 'Arc radius could not hold',
+        detail: `${piece.name} · ${segment.label ?? 'edge'} grades to a ${chord.toFixed(1)}mm chord at ${size.label}, wider than twice its ${radius.toFixed(1)}mm radius — it draws as the shortest arc that still reaches both ends, not the shape drawn at base size.`,
+        pieceId: piece.id,
+        segmentId: segment.id,
+        sizeId: size.id,
+      });
+    }
+  }
+
+  return out;
+};
+
+/** A segment plus the piece it lives on, for a mate lookup across the document. */
+const findSegmentInDocument = (
+  document: PatternDocument,
+  segmentId: string,
+): { readonly piece: PatternPiece; readonly segment: PieceSegment } | null => {
+  for (const piece of document.pieces) {
+    const segment = piece.segments.find((s) => s.id === segmentId);
+    if (segment) return { piece, segment };
+  }
+  return null;
+};
+
+/**
+ * Mated seams whose graded lengths pull apart.
+ *
+ * Nothing in `buildGraded` keeps a `mateSegmentId` pair the same length
+ * across a size — each side grades from its own piece's own rules, with no
+ * knowledge the other exists. That is a real, stated limitation (see the
+ * module doc), and this is what makes it visible instead of leaving a
+ * grader to discover it by walking the seam on a cut sample.
+ */
+const matingSeamDiagnostics = (document: PatternDocument, pieceId?: PieceId): readonly GradeDiagnostic[] => {
+  const out: GradeDiagnostic[] = [];
+  const pieces = pieceId ? document.pieces.filter((p) => p.id === pieceId) : document.pieces;
+
+  for (const piece of pieces) {
+    for (const segment of piece.segments) {
+      if (!segment.mateSegmentId) continue;
+      const mate = findSegmentInDocument(document, segment.mateSegmentId);
+      if (!mate) continue;
+
+      for (const size of gradedSizes(document.sizeRange)) {
+        const gradedPiece = gradePiece(piece, document.gradeRules, size.id);
+        const gradedMatePiece = gradePiece(mate.piece, document.gradeRules, size.id);
+        const gradedSegment = gradedPiece.segments.find((s) => s.id === segment.id);
+        const gradedMateSegment = gradedMatePiece.segments.find((s) => s.id === mate.segment.id);
+        if (!gradedSegment || !gradedMateSegment) continue;
+
+        const length = segmentLength(gradedPiece, gradedSegment);
+        const mateLength = segmentLength(gradedMatePiece, gradedMateSegment);
+        const diff = Math.abs(length - mateLength);
+        if (diff <= MATING_LENGTH_TOLERANCE_MM) continue;
+
+        out.push({
+          id: `grade-mate-mismatch:${piece.id}:${segment.id}:${size.id}`,
+          severity: 'error',
+          code: 'grade-mate-mismatch',
+          label: 'Mated seams diverge',
+          detail: `${piece.name} · ${segment.label ?? 'edge'} grades to ${length.toFixed(1)}mm at ${size.label}, against ${mateLength.toFixed(1)}mm on ${mate.piece.name} · ${mate.segment.label ?? 'edge'} — a ${diff.toFixed(1)}mm mismatch neither piece's rules account for.`,
+          pieceId: piece.id,
+          segmentId: segment.id,
+          sizeId: size.id,
+        });
+      }
+    }
+  }
+
+  return out;
+};
+
+/**
+ * Every real, computed grading finding for a document — or one piece of it.
+ *
+ * Two checks today: an arc whose radius the stated hold-constant policy could
+ * not honour, and a pair of mated seams that grade to different lengths. Both
+ * are exact — no heuristic scoring, no invented severity beyond "past this
+ * millimetre threshold" — because a false anomaly is worse than a missed one
+ * on a panel a grader is meant to trust.
+ */
+export const gradeDiagnostics = (
+  document: PatternDocument,
+  pieceId?: PieceId,
+): readonly GradeDiagnostic[] => {
+  const pieces = pieceId ? document.pieces.filter((p) => p.id === pieceId) : document.pieces;
+  const arcFindings = pieces.flatMap((piece) =>
+    arcRadiusDiagnostics(piece, document.gradeRules, document.sizeRange),
+  );
+  const matingFindings = matingSeamDiagnostics(document, pieceId);
+  return [...arcFindings, ...matingFindings];
 };

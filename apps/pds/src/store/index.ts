@@ -56,6 +56,14 @@ export { useViewportStore } from './viewportStore';
 export type { ViewportState } from './viewportStore';
 export { useGradeStore } from './gradeStore';
 export type { GradeState } from './gradeStore';
+export {
+  createGradeRule,
+  renameGradeRule,
+  deleteGradeRule,
+  setGradeIncrement,
+  setPointsGradeRule,
+  nextDraftGradeRuleName,
+} from './gradeCommands';
 export { useHistoryStore } from './historyStore';
 export type { HistoryState, DocumentCommand, HistoryEntry } from './historyStore';
 export {

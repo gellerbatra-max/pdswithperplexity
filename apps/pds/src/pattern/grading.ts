@@ -1,4 +1,5 @@
-import type { GradeRuleId, SizeId } from './ids';
+import type { Diagnostic } from '@/diagnostics';
+import type { GradeRuleId, PieceId, PointId, SegmentId, SizeId } from './ids';
 
 /**
  * Grading: how the base pattern becomes a size range.
@@ -46,3 +47,17 @@ export const findIncrement = (
   rule: GradeRule,
   sizeId: SizeId,
 ): GradeIncrement | undefined => rule.increments.find((i) => i.sizeId === sizeId);
+
+/**
+ * A grading-specific finding: the shared `Diagnostic` shape plus the piece,
+ * and optionally the segment/point/size, it is scoped to. `nest.ts` computes
+ * these for real, from the graded geometry — this replaced a hand-written
+ * mock list that could not tell a real pattern from a broken one.
+ */
+export interface GradeDiagnostic extends Diagnostic {
+  readonly pieceId: PieceId;
+  readonly segmentId?: SegmentId;
+  readonly pointId?: PointId;
+  /** The size this finding shows up at. Absent means the whole piece. */
+  readonly sizeId?: SizeId;
+}

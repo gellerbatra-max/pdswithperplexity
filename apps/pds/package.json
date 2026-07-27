@@ -10,8 +10,10 @@
     "typecheck": "tsc -b --pretty",
     "check:offset": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/register.mjs scripts/check-offset.ts",
     "check:curve": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/register.mjs scripts/check-curve.ts",
-    "check": "npm run check:curve && npm run check:offset && npm run check:roundtrip",
-    "check:roundtrip": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/register.mjs scripts/check-roundtrip.ts"
+    "check": "npm run check:curve && npm run check:offset && npm run check:roundtrip && npm run check:grading && npm run check:dxf",
+    "check:roundtrip": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/register.mjs scripts/check-roundtrip.ts",
+    "check:grading": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/register.mjs scripts/check-grading.ts",
+    "check:dxf": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/register.mjs scripts/check-dxf-import.ts"
   },
   "dependencies": {
     "react": "^19.2.0",
