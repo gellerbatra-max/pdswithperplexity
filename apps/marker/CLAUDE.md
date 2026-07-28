@@ -874,6 +874,71 @@ Wire every shortcut in the Keys tab that is not yet implemented.
 
 ---
 
+## Phase 1 — Visual Foundation (Post Build-Order)
+
+The 11-step build order is complete. Phase 1 is about how the app
+looks, not what it does.
+
+### Phase 1 Step 1 — Design System
+
+Create `apps/marker/src/styles/design-system.css` holding:
+- 8 bundle colours, colour-blind safe, readable in dark mode
+- selected, violation, buffer, canvas, fabric, grid, ruler, tray,
+  dock, ribbon and status colours
+- typography scale, spacing scale, border radii
+
+Import it in `marker.css` **after** the PDS tokens.
+
+The original instruction said "before … so marker tokens win", which
+is backwards: custom properties at equal specificity resolve
+last-declared-wins, so importing first hands every shared name back to
+PDS. Second is what makes marker win.
+
+Two surfaces, not one. The chrome is dark and the fabric is pale, so a
+colour used in both places needs a variant for each — hence `-line` and
+`-fill` for pieces on fabric, and `-chip` for badges on dark chrome.
+
+Colour is never the only signal: selection is also a thicker stroke, a
+violation is also dashed.
+
+✓ Verify: tokens resolve at runtime.
+✓ Verify: no TypeScript errors.
+✓ Verify: the app still runs.
+
+### Phase 1 Step 2 — Piece Rendering Overhaul
+
+Rewrite `PieceLayer.ts` so a piece reads as a piece: bundle colour,
+grain line, centred name and size, a selection ring, and a violation
+flash when it overlaps something.
+
+**Konva cannot read a CSS custom property.** It draws with literal
+colour strings, so `canvas/theme.ts` resolves the tokens out of the DOM
+once at canvas construction and hands the layer a typed palette. Read
+once, not per frame — a layout query in the draw loop is a bug waiting
+to happen. Nothing under `canvas/` may hard-code a colour.
+
+Supporting pure modules, both tested without a DOM:
+- `marker/bundles.ts` — bundle to colour slot. Sorted, not first-seen,
+  so a bundle does not change colour because an unrelated piece was
+  deleted. Wraps past eight rather than inventing a ninth hue.
+- `marker/violations.ts` — overlaps between pieces and against defect
+  zones, honouring the wider of two cutter buffers. Reports both sides
+  of an overlap. The fabric edge is deliberately not a violation.
+
+Caching rules, which the flash depends on:
+- A violating piece stays **uncached** while it pulses; a cached group
+  cannot repaint.
+- Changing colour, selection or violation state invalidates the cache.
+- Violations are memoised on the document, so panning does not
+  recompute them.
+
+✓ Verify: a DXF imports and pieces render with colour, grain and labels.
+✓ Verify: the selected piece shows the amber ring.
+✓ Verify: overlapping pieces flash red, and stop when resolved.
+✓ Verify: no TypeScript errors, existing tests still pass.
+
+---
+
 ## Replying to Claude After Each Step
 
 After Claude says "Step [N] complete ✓", reply with:

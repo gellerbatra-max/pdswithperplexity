@@ -1,0 +1,195 @@
+/*
+ * Marker design system.
+ *
+ * Loaded AFTER the PDS tokens so these values win. CSS custom properties at
+ * equal specificity resolve last-declared-wins, so importing this first would
+ * hand every shared name back to PDS — the opposite of the intent. Names that
+ * PDS already defines and marker is happy with are re-declared here anyway, so
+ * this file reads as the complete marker scale rather than a diff nobody can
+ * follow.
+ *
+ * Two surfaces, not one. The chrome is dark; the fabric is pale. A colour that
+ * works on one can vanish on the other, so anything that appears in both
+ * places carries a variant for each: `-line` and `-fill` are for pieces on
+ * fabric, `-chip` is for badges on dark chrome.
+ */
+
+:root {
+  /* --- Bundle colours ---------------------------------------------------
+   *
+   * Eight categorical hues from the Okabe-Ito palette, which is built to stay
+   * distinguishable under deuteranopia, protanopia and tritanopia — the point
+   * of colour-coding bundles is lost if two of them read the same to the
+   * person at the cutting table.
+   *
+   * Hue carries the identity; the three roles differ only in lightness, so a
+   * bundle is recognisably itself in the tray and on the fabric.
+   *
+   * `-line`  strokes and text on pale fabric, dark enough to clear 3:1
+   * `-fill`  piece interiors on pale fabric, light enough for a label on top
+   * `-chip`  badges and swatches on dark chrome
+   */
+  --bundle-1-line: #9a6b00;
+  --bundle-1-fill: #f7e9cc;
+  --bundle-1-chip: #e69f00;
+
+  --bundle-2-line: #1b6e96;
+  --bundle-2-fill: #ddf0fa;
+  --bundle-2-chip: #56b4e9;
+
+  --bundle-3-line: #00705a;
+  --bundle-3-fill: #d2f0e7;
+  --bundle-3-chip: #00c08b;
+
+  --bundle-4-line: #7a6300;
+  --bundle-4-fill: #f7f3c9;
+  --bundle-4-chip: #e8d44d;
+
+  --bundle-5-line: #005b8f;
+  --bundle-5-fill: #d6e8f5;
+  --bundle-5-chip: #4da3e0;
+
+  --bundle-6-line: #a34200;
+  --bundle-6-fill: #fae2d4;
+  --bundle-6-chip: #f07a3c;
+
+  --bundle-7-line: #94517a;
+  --bundle-7-fill: #f3e1ec;
+  --bundle-7-chip: #d79bc4;
+
+  /* Neutral eighth: Okabe-Ito's is black, which disappears against the
+     canvas. A slate keeps it a colour rather than an absence. */
+  --bundle-8-line: #4e5866;
+  --bundle-8-fill: #e4e7eb;
+  --bundle-8-chip: #a9b4c0;
+
+  /* --- Piece states -----------------------------------------------------
+   *
+   * These must never be mistaken for a bundle colour, so they are set apart
+   * by weight and pattern as well as hue: selection is a thicker stroke, a
+   * violation is dashed. Colour alone is not a signal anyone should depend on.
+   */
+  --selected-line: #f59e0b;
+  --selected-fill: #fef3c7;
+  --selected-width: 2px;
+
+  --violation-line: #e5484d;
+  --violation-fill: rgba(229, 72, 77, 0.14);
+  --violation-dash: 6px 4px;
+
+  /* The cutter buffer is a keep-out zone, not an object: shown as a band
+     around a piece rather than an outline of one. */
+  --buffer-line: rgba(37, 99, 235, 0.35);
+  --buffer-fill: rgba(37, 99, 235, 0.08);
+
+  /* Default piece, before any bundle colouring applies. */
+  --piece-line: #2563eb;
+  --piece-fill: #dbeafe;
+  --piece-label: #1e3a8a;
+
+  /* --- Canvas -----------------------------------------------------------
+   *
+   * The stage is the darkest surface and the fabric the lightest: the fabric
+   * is the subject, and everything else steps back from it.
+   */
+  --canvas-bg: #0b0e12;
+  --fabric-bg: #f4f4f5;
+  --fabric-edge: #d4d4d8;
+  --fabric-guide: #a1a1aa;
+
+  --grid-line: rgba(15, 23, 42, 0.06);
+  --grid-line-major: rgba(15, 23, 42, 0.12);
+
+  --ruler-tick: #a1a1aa;
+  --ruler-tick-major: #71717a;
+  --ruler-label: #52525b;
+
+  /* Defect zones and splice lines are obstacles the marker maker did not
+     choose, so they read as damage rather than as content. */
+  --defect-fill: rgba(229, 72, 77, 0.18);
+  --defect-line: #e5484d;
+  --splice-line: #c2a058;
+
+  /* --- Chrome -----------------------------------------------------------
+   *
+   * Panel surfaces sit close together in value so the chrome reads as one
+   * calm mass around the stage.
+   */
+  --tray-bg: #161a21;
+  --tray-row-hover: rgba(255, 255, 255, 0.035);
+  --tray-badge-bg: #1b2028;
+
+  --dock-bg: #161a21;
+  --dock-tab-active-bg: rgba(109, 163, 212, 0.1);
+  --dock-tab-active-text: #8bb8e0;
+
+  --ribbon-bg: #14181f;
+  --ribbon-label: #6d7686;
+  --ribbon-value: #e4e9f0;
+
+  --status-bg: #101319;
+  --status-info: #6da3d4;
+  --status-ok: #6b9e83;
+  --status-warn: #c2a058;
+  --status-error: #c97182;
+  --status-idle: #6d7686;
+
+  /* Marker state chips, matching markerStatus(). */
+  --state-made-text: #6b9e83;
+  --state-made-bg: rgba(107, 158, 131, 0.16);
+  --state-partial-text: #c2a058;
+  --state-partial-bg: rgba(194, 160, 88, 0.16);
+  --state-unmade-text: #808a9a;
+  --state-unmade-bg: #1b2028;
+
+  /* --- Typography -------------------------------------------------------
+   *
+   * A marker screen is dense and read at arm's length, so the scale is tight
+   * and bottoms out at 10px. Numbers are tabular everywhere they change while
+   * you watch — a length that shifts its digits sideways is hard to read.
+   */
+  --font-ui: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 14px;
+  --text-xl: 18px;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  --leading-tight: 1.35;
+  --leading-normal: 1.5;
+  --tracking-wide: 0.055em;
+
+  /* --- Spacing ----------------------------------------------------------
+   *
+   * Four-pixel base, with a 2px step below it for the hairline gaps inside
+   * badges and chips.
+   */
+  --space-0: 2px;
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 48px;
+
+  /* --- Radii ------------------------------------------------------------
+   *
+   * Small and consistent. Large radii read as consumer software, and this is
+   * a tool.
+   */
+  --radius-none: 0;
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+  --radius-xl: 11px;
+  --radius-pill: 999px;
+}

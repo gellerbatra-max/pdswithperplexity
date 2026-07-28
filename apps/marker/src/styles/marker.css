@@ -11,6 +11,12 @@
  * real thing looks on a cutting-room screen.
  */
 @import '../../../pds/src/styles/tokens.css';
+/*
+ * Second, not first. Equal-specificity custom properties resolve
+ * last-declared-wins, so importing the marker system ahead of the PDS tokens
+ * would let PDS win every shared name — the opposite of what we want.
+ */
+@import './design-system.css';
 
 * {
   box-sizing: border-box;
