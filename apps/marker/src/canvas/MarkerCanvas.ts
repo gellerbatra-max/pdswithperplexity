@@ -3,6 +3,7 @@ import type { MarkerDocument, Point } from '@/marker/schema';
 import { markerLength } from '@/marker/selectors';
 import { FabricLayer } from './layers/FabricLayer';
 import { PieceLayer } from './layers/PieceLayer';
+import { readPalette } from './theme';
 import { DragTool, type DragToolContext } from './tools/DragTool';
 import { SelectTool } from './tools/SelectTool';
 import type { MarkerTransform, ViewportSnapshot } from './types';
@@ -36,7 +37,11 @@ export interface MarkerCanvasCallbacks {
 export class MarkerCanvas {
   private readonly stage: Konva.Stage;
   private readonly fabricLayer = new FabricLayer();
-  private readonly pieceLayer = new PieceLayer();
+  /**
+   * Canvas colours are resolved from the design tokens once, here: Konva takes
+   * literal colour strings and cannot read a CSS custom property.
+   */
+  private readonly pieceLayer = new PieceLayer(readPalette());
 
   // Layer order is the render order: fabric behind, UI in front. Only the
   // piece layer listens; Konva 9.3 deprecates FastLayer in favour of exactly
