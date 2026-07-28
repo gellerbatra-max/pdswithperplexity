@@ -1,25 +1,50 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { fuzzyRank } from '@/commands/fuzzy';
 import { COMMANDS, type Command } from '@/commands/registry';
 import { useMarkerStore } from '@/store/markerStore';
 import { useUiStore } from '@/store/uiStore';
 
 /**
- * ⌘K palette over the command registry.
+ * ⌘K over the command registry.
  *
- * Deliberately small: the registry is the list, so anything reachable by a
- * shortcut is reachable here, and a command added in one place appears in
- * both without a second edit.
+ * The registry is the list, so anything reachable by a shortcut is reachable
+ * here and a command added in one place appears in both. Matching is fuzzy
+ * because substring search fails how people type — "rotcw" should find
+ * "Rotate clockwise", and it contains no such substring.
  */
+
+/** Highlight the characters the query actually matched. */
+const Highlighted = ({ text, indices }: { text: string; indices: readonly number[] }) => {
+  if (indices.length === 0) return <>{text}</>;
+  const marked = new Set(indices);
+  return (
+    <>
+      {[...text].map((character, index) =>
+        marked.has(index) ? (
+          <mark key={index} className="palette__hit">
+            {character}
+          </mark>
+        ) : (
+          <span key={index}>{character}</span>
+        ),
+      )}
+    </>
+  );
+};
+
 export const CommandPalette = () => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [active, setActive] = useState(0);
   const selection = useUiStore((state) => state.selection);
+  const listRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         setQuery('');
+        setActive(0);
         setOpen((wasOpen) => !wasOpen);
         return;
       }
@@ -30,22 +55,30 @@ export const CommandPalette = () => {
         setOpen(false);
       }
     };
-    // Capture, so the palette sees Escape ahead of the canvas handler.
+    // Capture, so the palette sees these ahead of the canvas handler.
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [open]);
 
   const matches = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return COMMANDS.filter((command) => {
-      if (command.needsSelection && selection.length === 0) return false;
-      if (needle === '') return true;
-      return (
-        command.label.toLowerCase().includes(needle) ||
-        command.keys.toLowerCase().includes(needle)
-      );
-    });
+    const available = COMMANDS.filter(
+      (command) => !command.needsSelection || selection.length > 0,
+    );
+    // Search the keys too, so "ctrl+z" finds undo.
+    return fuzzyRank(query, available, (command) => `${command.label} ${command.keys}`);
   }, [query, selection.length]);
+
+  // Any change to the result set invalidates the highlighted row.
+  useEffect(() => {
+    setActive(0);
+  }, [query]);
+
+  useEffect(() => {
+    if (!open) return;
+    listRef.current
+      ?.querySelector('[data-active="true"]')
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [active, open]);
 
   if (!open) return null;
 
@@ -54,6 +87,25 @@ export const CommandPalette = () => {
     if (!marker) return;
     setOpen(false);
     command.run({ document: marker, selection: useUiStore.getState().selection });
+  };
+
+  const onInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActive((index) => (matches.length === 0 ? 0 : (index + 1) % matches.length));
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActive((index) =>
+        matches.length === 0 ? 0 : (index - 1 + matches.length) % matches.length,
+      );
+      return;
+    }
+    if (event.key === 'Enter') {
+      const chosen = matches[active];
+      if (chosen) run(chosen.item);
+    }
   };
 
   return (
@@ -66,12 +118,11 @@ export const CommandPalette = () => {
           autoFocus
           placeholder="Search commands…"
           value={query}
+          aria-label="Search commands"
           onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && matches[0]) run(matches[0]);
-          }}
+          onKeyDown={onInputKeyDown}
         />
-        <ul className="palette__list">
+        <ul className="palette__list" ref={listRef}>
           {matches.length === 0 ? (
             <li className="palette__empty">
               {selection.length === 0
@@ -79,11 +130,19 @@ export const CommandPalette = () => {
                 : 'No matches.'}
             </li>
           ) : (
-            matches.map((command) => (
-              <li key={command.id}>
-                <button type="button" className="palette__item" onClick={() => run(command)}>
-                  <span>{command.label}</span>
-                  <kbd>{command.keys}</kbd>
+            matches.map(({ item, match }, index) => (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className="palette__item"
+                  data-active={index === active}
+                  onMouseEnter={() => setActive(index)}
+                  onClick={() => run(item)}
+                >
+                  <span>
+                    <Highlighted text={item.label} indices={match.indices} />
+                  </span>
+                  <kbd>{item.keys}</kbd>
                 </button>
               </li>
             ))

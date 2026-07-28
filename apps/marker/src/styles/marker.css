@@ -1084,3 +1084,118 @@ select {
 .topbar__back {
   margin-right: var(--space-2);
 }
+
+/* --- Top bar rename, save indicator, auto-nest menu ---------------------- */
+
+.topbar__name {
+  max-width: 28ch;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+}
+
+.topbar__name:hover {
+  border-color: var(--border-default);
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.topbar__rename {
+  width: 28ch;
+  height: var(--control-height);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  outline: none;
+}
+
+.topbar__save {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.topbar__save-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: currentcolor;
+}
+
+.autonest__menu {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  z-index: 20;
+  width: 268px;
+  padding: var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-md);
+}
+
+.autonest__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.autonest__slider {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.autonest__effort {
+  width: 1.5ch;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.autonest__note {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+.autonest__warn {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-2xs);
+  color: var(--warning);
+}
+
+.autonest__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.autonest__count {
+  font-size: var(--text-2xs);
+  color: var(--text-faint);
+}
+
+.autonest__running {
+  color: var(--warning);
+}
+
+.palette__item[data-active='true'] {
+  background: var(--accent-soft);
+}
+
+.palette__hit {
+  background: none;
+  color: var(--accent-strong);
+  font-weight: var(--weight-semibold);
+}

@@ -40,6 +40,8 @@ export interface MarkerState {
   addPiece: (piece: PlacedPiece) => void;
   removePiece: (id: string) => void;
   setFabricWidth: (width: number) => void;
+  /** Rename the open marker. Not a setting — it is the document's identity. */
+  renameMarker: (name: string) => void;
   updateSettings: (patch: Partial<MarkerSettings>) => void;
   /** Instantiate one tray piece onto the marker and count it as placed. */
   placeFromTray: (trayPieceId: string, position: Point) => void;
@@ -123,6 +125,17 @@ export const useMarkerStore = create<MarkerState>((set) => ({
 
   setFabricWidth: (fabricWidth) =>
     set((state) => edit(state, (document) => ({ ...document, fabricWidth }))),
+
+  renameMarker: (name) =>
+    set((state) =>
+      edit(state, (document) => {
+        const trimmed = name.trim();
+        // A nameless marker is unfindable on the home screen, so an empty
+        // rename is refused rather than stored.
+        if (trimmed === '' || trimmed === document.name) return document;
+        return { ...document, name: trimmed };
+      }),
+    ),
 
   updateSettings: (patch) => set((state) => edit(state, (document) => ({ ...document, ...patch }))),
 

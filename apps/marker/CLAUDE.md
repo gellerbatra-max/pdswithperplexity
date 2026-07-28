@@ -1073,6 +1073,67 @@ which left it dead.
 ✓ Verify: the blank-marker dialog validates and creates.
 ✓ Verify: back returns home, and the opened marker leads the list.
 
+### Phase 1 Step 7 — Top Bar + Command Palette
+
+Inline rename, an Auto-Nest dropdown carrying the effort slider, a save
+indicator, and a ⌘K palette with fuzzy search.
+
+**Matching is fuzzy, not substring.** "rotcw" should find "Rotate
+clockwise", and it contains no such substring. `commands/fuzzy.ts` scores
+a subsequence match — adjacency, word starts and prefixes raise it, gaps
+lower it — and ties keep the registry's declared order so the list does
+not reshuffle as you type. The palette searches label *and* keys, so
+"ctrl+z" finds Undo.
+
+Rename commits on blur or Enter, never per keystroke: the same reason as
+the width field, plus the marker would flicker through "A", "Au", "Aut"
+in the recent list.
+
+The Auto-Nest menu names what each effort costs, and warns at 4–5.
+Effort subdivides the placement grid *and* the angle set, so run time
+grows far faster than "1 to 5" suggests.
+
+✓ Verify: rename commits once; Escape discards; blank is refused.
+✓ Verify: auto-nest shows progress and can be cancelled mid-run.
+✓ Verify: the palette opens, navigates by arrow, and runs on Enter.
+✓ Verify: the save indicator moves Saved → Unsaved → Saved.
+
+### Phase 1 Step 8 — Integration regression
+
+A standing checklist, not a one-off. Run all of it before calling a
+phase done:
+
+- full suite green, both apps typecheck
+- one real multi-bundle DXF through import → tray → render → auto-nest
+  → export → re-import, with **zero** warnings on the way back
+- `apps/pds` builds byte-identical (`index-fEsK0ljj.js`, 295.54 kB)
+- `npm audit --omit=dev` reports 0; the dev-only advisory is expected
+- Lighthouse ≥ 90 on performance, accessibility, best practices, SEO
+- no import cycles, no `any`, no unexplained type assertions
+
+**Look at it.** The run that found the label overlap passed every
+programmatic gate — scene-graph evidence cannot tell you that three
+labels are sitting on top of each other.
+
+### Phase 1 label fix — labels must fit their piece
+
+`MIN_LABEL_SCALE` checked only the zoom, so a 22 x 10 cm cuff was given
+the same label as a 50 x 68 cm back and it ran across its neighbours.
+
+Labels are now measured against the piece and degrade in tiers: full
+(name + size) → name only, shrunk to fit → truncated with an ellipsis →
+nothing. The floor is 8px; below that a label is decoration, and the
+grain line and bundle colour still identify the piece where a smear
+across three neighbours identifies nothing.
+
+Text width scales linearly with font size, so one measurement gives the
+whole curve — the draw path never re-measures in a loop.
+
+Fitting is against the bounding box. A deeply concave piece can still
+put its label over its own hollow; fitting the true outline needs the
+largest inscribed rectangle, which is a lot of work for the few pieces
+it would change.
+
 ---
 
 ## Replying to Claude After Each Step
