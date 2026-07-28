@@ -154,8 +154,15 @@ apps/marker/
     │   └── cutsequence/         ← Cut sequencing + knife path
     ├── commands/                ← Marker command registry (plain TS, no React)
     ├── nest/
-    │   ├── heuristic.ts         ← Bottom-Left Fill (runs in Web Worker)
-    │   └── aiClient.ts          ← Stub for Phase 5 AI nesting API
+    │   ├── model.ts             ← Nesting data model (request, plan, constraints)
+    │   ├── shelf.ts             ← "Shelf" engine — rows across the fabric
+    │   ├── heuristic.ts         ← "Bottom-left fill" engine
+    │   ├── pipeline.ts          ← runNest / runMode — the only entry point
+    │   ├── scoring.ts           ← Utilisation, waste, stability, runtime
+    │   ├── nestRunner.ts        ← Main-thread worker orchestration
+    │   ├── nestProtocol.ts      ← Worker message contract
+    │   └── workers/
+    │       └── nestWorker.ts    ← Runs the pipeline off the main thread
     ├── io/
     │   ├── dxfImporter.ts       ← AAMA DXF + RUL parser
     │   ├── dxfExporter.ts       ← AAMA ZIP export
@@ -399,12 +406,18 @@ splice lines (treated as full-height vertical walls).
 
 ## Heuristic Auto-Nest
 
-File: `apps/marker/src/nest/heuristic.ts`
+File: `apps/marker/src/nest/heuristic.ts` — the engine labelled
+**Bottom-left fill**.
+
+> Superseded in part by **Phase 4 — Nesting Engines** below. The algorithm
+> here is current; the worker protocol and the entry point are not. There are
+> now two engines behind `pipeline.runMode`, and the worker carries a
+> `NestRequest` and a mode rather than this section's `NestInput`.
 
 Runs inside a **Web Worker** — never on the main thread.
 The UI posts a message and receives progress + result.
 
-### Worker message protocol:
+### Worker message protocol (superseded — see Phase 4):
 ```
 Main → Worker: { type: 'NEST', input: NestInput }
 Worker → Main: { type: 'PROGRESS', percent: number }
@@ -1239,6 +1252,95 @@ predates home-first navigation, when the audit only ever saw the workspace.
 ✓ Verify: drag-to-open still works and does not strobe when the pointer
   crosses a card.
 ✓ Verify: 97 / 100 / 96 / 91 on Lighthouse; PDS byte-identical; 437 tests.
+
+---
+
+## Phase 4 — Nesting Engines
+
+Two engines, one entry point, five modes. This section is the mapping; change
+it here first, then in code.
+
+### Engines — names and files
+
+| Label shown to the user | Engine key | File |
+|---|---|---|
+| **Shelf** | `shelf` | `nest/shelf.ts` |
+| **Bottom-left fill** | `heuristic` | `nest/heuristic.ts` |
+
+**Bottom-left fill is `heuristic.ts`.** The file is named for what it is — a
+heuristic — and the label for what it does. They are the same engine. Shelf is
+`shelf.ts`, and it is not "shelf/BLF": the two are different algorithms.
+
+- **Shelf** lays rows across the fabric. A shelf fills up the width, then a new
+  one opens past the deepest piece in the last. Fast, obvious, and the floor
+  every other engine is measured against.
+- **Bottom-left fill** scans the fabric and takes the first legal position for
+  each piece. Slower, and usually tighter.
+
+`ENGINE_LABELS` and `MODE_LABELS` in `nest/pipeline.ts` must agree on those two
+strings, with no decoration. An engine that reads "Shelf" in the dropdown and
+"Shelf (fast)" in the status line looks like two engines. A test pins both
+maps and the mode mapping; it fails on drift rather than letting it ship.
+
+### Modes
+
+`NestMode` in `nest/pipeline.ts`. `enginesForMode` is the mapping.
+
+| Mode | Runs | Why |
+|---|---|---|
+| `fastest` | Shelf | Intent: cheapest run |
+| `tightest` | Bottom-left fill | Intent: least fabric |
+| `best` | Both, keeps the better score | When it matters more than the wait |
+| `shelf` | Shelf | Pinned engine |
+| `heuristic` | Bottom-left fill | Pinned engine |
+
+**Why `fastest` and `tightest` are intents.** They say what matters on this
+run and let the pipeline pick. `shelf` and `heuristic` pin an engine, which is
+what you want when comparing markers or chasing an unexpected placement. Today
+each intent resolves to one engine, so the pairs behave alike — they stop
+behaving alike the moment a third engine lands, and the intent keeps working
+without anyone revisiting their choice.
+
+**Why `best` exists.** Bottom-left fill does not always win. On uniform piece
+depths a shelf fills exactly and both engines tie; on one real order the shelf
+baseline came out ahead, 69.1% against 69.0%. `best` runs both and ranks them
+by `compareScores`, so nobody has to guess which engine suits an order. It is
+the only mode that pays for two runs. A tie keeps the declared order, so it
+falls back to the cheaper engine rather than buying the slower one for nothing.
+
+**Ranking order** (`nest/scoring.ts`): stability, then unplaced count, then
+utilisation. An unsafe marker is not a candidate at any utilisation, and one
+missing four pieces is not a marker. Runtime is deliberately not a tiebreak —
+a marker is cut for weeks and nested once.
+
+**Default is `tightest`.** That is bottom-left fill, which is what Auto-Nest
+ran before modes existed. Changing the default would quietly change the
+markers every existing user gets.
+
+### Shape
+
+`runMode(request, mode)` returns one `ScoredRun` whether one engine ran or
+two — `best` is a different cost, not a different shape. Placements are named
+`pieceId` throughout; `toStorePlacements` renames to the store's `pieceDefId`
+at that one boundary. Nothing above the pipeline knows which engine ran.
+
+Progress is scaled across the engines a mode runs, so `best` reports 0–100
+once. A bar that restarts halfway reads as a failure and a retry.
+
+Everything is local and deterministic: same request and mode in, same plan out.
+`scoring.timeRun` is the only function that reads a clock, and it is kept out
+of `runNest` so plans stay comparable — a plan carrying its own timing would
+never equal itself.
+
+### Outstanding — bottom-left fill scaling
+
+`TODO(performance)` in `nest/heuristic.ts`. The scan is
+O(positions × obstacles), positions scale with effort squared, and every
+obstacle is retested at every candidate position however far away it is.
+Bucketing obstacles into fabric-width cells and testing only the buckets a
+candidate touches would make the cost independent of marker length, which is
+what a 200-piece order at effort 5 needs. Shelf does not have this problem;
+it never scans.
 
 ---
 
