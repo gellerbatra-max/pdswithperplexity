@@ -1001,6 +1001,38 @@ Drag-to-canvas:
 ✓ Verify: completed rows are dimmed and sorted last.
 ✓ Verify: dropping a DXF file still imports.
 
+### Phase 1 Step 5 — Ribbon Redesign
+
+`BottomRibbon` becomes stat cards — Width, Length, Utilisation,
+Consumption — with the marker name and order chip on the left and the
+status chip pinned right.
+
+**Utilisation bands live in `marker/utilisation.ts`**, not in JSX: under
+70% something is wrong with the marker, 70–85% is ordinary work, 85% and
+up is good. These are the bands the trade uses and they are a judgement,
+not a law — a stiff fabric with a strict lay direction will never reach
+the top band, so a factory with its own standard changes two constants
+in one file.
+
+The bar clamps its fill at 100% while the figure keeps reading the truth.
+Utilisation exceeds 100% when pieces overlap, and a bar running past its
+track reads as a rendering fault rather than the placement fault it is.
+
+Band is carried as a `data-band` attribute and an `aria-label`, not only
+as colour — the one number a marker maker is judged on must not be
+invisible to someone who cannot separate three hues.
+
+**The width field commits on blur or Enter, never per keystroke.** Live
+committing set the width to 1, then 15, then 150 while "150" was typed:
+three fabric resizes, three undo entries, and two moments where pieces
+sat outside a marker briefly narrower than they are. It also made the
+field impossible to clear, since an empty string is not a valid width.
+Escape abandons the draft.
+
+✓ Verify: every readout follows a drag.
+✓ Verify: the width field commits once, and rejects a bad value.
+✓ Verify: the bar and the status chip change colour at their thresholds.
+
 ---
 
 ## Replying to Claude After Each Step

@@ -136,6 +136,14 @@
   --ribbon-bg: #14181f;
   --ribbon-label: #6d7686;
   --ribbon-value: #e4e9f0;
+  --ribbon-card-bg: rgba(255, 255, 255, 0.025);
+
+  /* Utilisation bands. Reusing the status hues on purpose: a marker maker
+     already reads amber as "look at this" everywhere else in the app. */
+  --util-track: rgba(255, 255, 255, 0.08);
+  --util-low: #c97182;
+  --util-fair: #c2a058;
+  --util-good: #6b9e83;
 
   --status-bg: #101319;
   --status-info: #6da3d4;

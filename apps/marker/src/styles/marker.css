@@ -509,8 +509,7 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
-.field__input:focus-visible,
-.ribbon__input:focus-visible {
+.field__input:focus-visible {
   outline: 1px solid var(--accent);
   border-color: var(--accent);
 }
@@ -540,18 +539,30 @@ select {
   display: flex;
   height: 48px;
   flex: 0 0 48px;
-  align-items: center;
-  gap: var(--space-5);
+  align-items: stretch;
+  gap: var(--space-4);
   padding: 0 var(--space-4);
   border-top: 1px solid var(--border-default);
-  background: var(--surface-chrome);
+  background: var(--ribbon-bg);
+}
+
+.ribbon__identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .ribbon__name {
+  overflow: hidden;
+  max-width: 22ch;
   font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ribbon__chip {
+  flex: 0 0 auto;
   padding: 2px var(--space-3);
   border-radius: var(--radius-pill);
   background: var(--surface-raised);
@@ -559,44 +570,129 @@ select {
   color: var(--text-muted);
 }
 
-.ribbon__field,
-.ribbon__stat {
+/* The cards take the middle and push the status chip to the right edge. */
+.ribbon__stats {
+  display: flex;
+  flex: 1;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* --- Stat cards -------------------------------------------------------- */
+
+.stat {
+  display: flex;
+  min-width: 92px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--ribbon-card-bg);
+}
+
+.stat[data-wide] {
+  min-width: 148px;
+}
+
+.stat__label {
+  font-size: var(--text-2xs);
+  line-height: 1.1;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--ribbon-label);
+}
+
+.stat__body {
   display: flex;
   align-items: center;
   gap: var(--space-2);
 }
 
-.ribbon__label {
-  font-size: var(--text-2xs);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-wide);
-  color: var(--text-faint);
-}
-
-.ribbon__value {
+.stat__value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  font-size: var(--text-md);
   font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  color: var(--ribbon-value);
 }
 
-.ribbon__unit {
+.stat__value[data-band='low'] {
+  color: var(--util-low);
+}
+
+.stat__value[data-band='fair'] {
+  color: var(--util-fair);
+}
+
+.stat__value[data-band='good'] {
+  color: var(--util-good);
+}
+
+.stat__unit {
   font-size: var(--text-2xs);
   color: var(--text-faint);
 }
 
-.ribbon__input {
-  width: 72px;
-  height: var(--control-height-sm);
+.stat__field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.stat__input {
+  width: 58px;
+  height: 20px;
   padding: 0 var(--space-2);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
   background: var(--surface-sunken);
+  font-size: var(--text-md);
   font-variant-numeric: tabular-nums;
 }
 
-.ribbon__spacer {
+.stat__input:focus-visible {
+  outline: 1px solid var(--accent);
+  border-color: var(--accent);
+}
+
+/* --- Utilisation bar --------------------------------------------------- */
+
+.util {
+  display: block;
   flex: 1;
+  height: 4px;
+  min-width: 48px;
+  border-radius: var(--radius-pill);
+  background: var(--util-track);
+  overflow: hidden;
+}
+
+.util__fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  transition: width var(--duration-base) var(--ease-out);
+}
+
+.util[data-band='low'] .util__fill {
+  background: var(--util-low);
+}
+
+.util[data-band='fair'] .util__fill {
+  background: var(--util-fair);
+}
+
+.util[data-band='good'] .util__fill {
+  background: var(--util-good);
 }
 
 .ribbon__status {
+  align-self: center;
   margin-top: 0;
 }
 
