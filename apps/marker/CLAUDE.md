@@ -1033,6 +1033,46 @@ Escape abandons the draft.
 ✓ Verify: the width field commits once, and rejects a bad value.
 ✓ Verify: the bar and the status chip change colour at their thresholds.
 
+### Phase 1 Step 6 — Home Screen
+
+`HomeScreen` is what the app shows when no marker is open: Open DXF and
+New blank marker, plus every marker already worked on as cards with a
+thumbnail, metadata, utilisation and status, and open / duplicate /
+delete on each.
+
+**"No marker open" is now a real state.** `markerStore.closeMarker()`
+clears the document and its history — undoing back into a closed marker
+would resurrect it uninvited — and `App` picks the screen from that one
+flag. There is no router: the app has exactly one piece of navigation
+state, it already lives in the store, and a marker cannot be linked to
+because it lives in this browser.
+
+**The app no longer auto-restores the last marker.** First load always
+shows home, which is what the step asks for. Nothing is lost — the last
+marker is the first card, since the list is ordered by `lastOpenedAt`,
+which is what that schema-v3 field was added for.
+
+`persistence.ts` replaced `restoreOrSeed` with `openMarker`,
+`closeMarker` and `listRecentMarkers`. `closeMarker` flushes first: the
+last two seconds of work would otherwise be dropped on the way back to
+the home screen, which is exactly when a user assumes it is safe.
+
+Deleting a marker removes its restore points in the same transaction —
+snapshots of a deleted marker can never be restored into anything — so
+delete asks for confirmation. There is no undo once it is gone.
+
+Thumbnails are drawn from the document rather than stored, so they can
+never disagree with the marker they claim to show.
+
+`createSeedMarker` was deleted. The home screen replaced auto-seeding,
+which left it dead.
+
+✓ Verify: home shows on first load, with an empty state.
+✓ Verify: recent markers appear with thumbnails and stats.
+✓ Verify: a DXF opens as a new marker named after the file.
+✓ Verify: the blank-marker dialog validates and creates.
+✓ Verify: back returns home, and the opened marker leads the list.
+
 ---
 
 ## Replying to Claude After Each Step

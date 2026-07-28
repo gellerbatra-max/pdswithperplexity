@@ -3,7 +3,7 @@ import type { MarkerDocument } from '@/marker/schema';
 import { useMarkerStore } from '@/store/markerStore';
 import { usePersistenceStore } from '@/store/persistenceStore';
 import { createMemoryRepository } from './memoryRepository';
-import { createRestorePoint, restoreOrSeed } from './persistence';
+import { closeMarker, createRestorePoint, listRecentMarkers, openMarker } from './persistence';
 import { RESTORE_POINT_LIMIT } from './repository';
 
 const doc = (id: string, updatedAt: string, name = id): MarkerDocument => ({
@@ -30,102 +30,121 @@ beforeEach(() => {
   usePersistenceStore.setState({ saveState: 'idle', lastSavedAt: null, lastError: null });
 });
 
-describe('restoreOrSeed', () => {
-  it('seeds a new marker when nothing is stored', async () => {
+describe('openMarker', () => {
+  it('loads the marker into the store', async () => {
     const repository = createMemoryRepository();
-    const outcome = await restoreOrSeed(repository);
-
-    expect(outcome.restored).toBe(false);
-    expect(useMarkerStore.getState().document).not.toBeNull();
+    await openMarker(doc('m1', '2026-06-01T00:00:00.000Z'), repository, undefined, '2026-07-01T09:00:00.000Z');
+    expect(useMarkerStore.getState().document?.id).toBe('m1');
   });
 
-  it('reopens the most recently updated marker', async () => {
+  it('opens with an empty undo history', async () => {
     const repository = createMemoryRepository();
-    await repository.saveMarker(doc('old', '2026-01-01T00:00:00.000Z'));
-    await repository.saveMarker(doc('newest', '2026-06-01T00:00:00.000Z'));
-    await repository.saveMarker(doc('middle', '2026-03-01T00:00:00.000Z'));
-
-    const outcome = await restoreOrSeed(repository);
-
-    expect(outcome.restored).toBe(true);
-    expect(useMarkerStore.getState().document?.id).toBe('newest');
-  });
-
-  it('opens a restored marker with an empty undo history', async () => {
-    const repository = createMemoryRepository();
-    await repository.saveMarker(doc('m1', '2026-06-01T00:00:00.000Z'));
-
-    await restoreOrSeed(repository);
-
+    await openMarker(doc('m1', '2026-06-01T00:00:00.000Z'), repository);
     expect(useMarkerStore.getState().past).toEqual([]);
     expect(useMarkerStore.getState().future).toEqual([]);
   });
 
-  it('marks a restored marker as already saved', async () => {
+  it('stamps lastOpenedAt and writes it straight through', async () => {
     const repository = createMemoryRepository();
-    await repository.saveMarker(doc('m1', '2026-06-01T00:00:00.000Z'));
+    const opened = await openMarker(
+      doc('m1', '2026-06-01T00:00:00.000Z'),
+      repository,
+      undefined,
+      '2026-07-01T09:00:00.000Z',
+    );
 
-    await restoreOrSeed(repository, undefined, '2026-07-01T09:00:00.000Z');
+    expect(opened.lastOpenedAt).toBe('2026-07-01T09:00:00.000Z');
+    // Written immediately, not left on the debounce, or a quick close loses
+    // it — and it is what orders the home screen.
+    expect(repository.markers.get('m1')?.lastOpenedAt).toBe('2026-07-01T09:00:00.000Z');
+  });
 
+  it('marks the document saved, since it was just written', async () => {
+    const repository = createMemoryRepository();
+    await openMarker(doc('m1', '2026-06-01T00:00:00.000Z'), repository, undefined, '2026-07-01T09:00:00.000Z');
     expect(usePersistenceStore.getState().saveState).toBe('saved');
     expect(usePersistenceStore.getState().lastSavedAt).toBe('2026-07-01T09:00:00.000Z');
   });
 
-  it('stamps lastOpenedAt and writes it straight through', async () => {
+  it('still opens when the stamp cannot be written', async () => {
     const repository = createMemoryRepository();
-    await repository.saveMarker(doc('m1', '2026-06-01T00:00:00.000Z'));
+    repository.failNextSaves(1, 'quota exceeded');
+    await openMarker(doc('m1', '2026-06-01T00:00:00.000Z'), repository);
 
-    const outcome = await restoreOrSeed(repository, undefined, '2026-07-01T09:00:00.000Z');
-
-    expect(outcome.marker.lastOpenedAt).toBe('2026-07-01T09:00:00.000Z');
-    // Written immediately, not left on the debounce, or a quick close loses it.
-    expect(repository.markers.get('m1')?.lastOpenedAt).toBe('2026-07-01T09:00:00.000Z');
-    expect(useMarkerStore.getState().document?.lastOpenedAt).toBe('2026-07-01T09:00:00.000Z');
-  });
-
-  it('reopens by lastOpenedAt, not by whichever auto-save fired last', async () => {
-    const repository = createMemoryRepository();
-    // 'edited' was written most recently but opened long ago; 'worked-on' is
-    // the one the user actually had in front of them.
-    await repository.saveMarker({
-      ...doc('edited', '2026-06-30T00:00:00.000Z'),
-      lastOpenedAt: '2026-01-01T00:00:00.000Z',
-    });
-    await repository.saveMarker({
-      ...doc('worked-on', '2026-02-01T00:00:00.000Z'),
-      lastOpenedAt: '2026-06-01T00:00:00.000Z',
-    });
-
-    const outcome = await restoreOrSeed(repository, undefined, '2026-07-01T09:00:00.000Z');
-
-    expect(outcome.marker.id).toBe('worked-on');
-  });
-
-  it('opens normally when the lastOpenedAt stamp cannot be written', async () => {
-    const repository = createMemoryRepository();
-    await repository.saveMarker(doc('m1', '2026-06-01T00:00:00.000Z'));
-    repository.failNextSaves(1);
-
-    const outcome = await restoreOrSeed(repository, undefined, '2026-07-01T09:00:00.000Z');
-
-    expect(outcome.restored).toBe(true);
     expect(useMarkerStore.getState().document?.id).toBe('m1');
+    expect(usePersistenceStore.getState().lastError).toBe('quota exceeded');
+  });
+});
+
+describe('closeMarker', () => {
+  it('leaves no marker open, which is what shows the home screen', async () => {
+    const repository = createMemoryRepository();
+    await openMarker(doc('m1', '2026-06-01T00:00:00.000Z'), repository);
+    await closeMarker();
+    expect(useMarkerStore.getState().document).toBeNull();
   });
 
-  it('falls back to a seed and reports when storage cannot be read', async () => {
+  it('clears the undo history with the document', async () => {
+    const repository = createMemoryRepository();
+    await openMarker(doc('m1', '2026-06-01T00:00:00.000Z'), repository);
+    useMarkerStore.getState().setFabricWidth(180);
+    expect(useMarkerStore.getState().past).toHaveLength(1);
+
+    await closeMarker();
+    // Undoing back into a closed marker would resurrect it uninvited.
+    expect(useMarkerStore.getState().past).toEqual([]);
+  });
+});
+
+describe('listRecentMarkers', () => {
+  it('is empty when nothing is stored', async () => {
+    expect(await listRecentMarkers(createMemoryRepository())).toEqual([]);
+  });
+
+  it('orders by lastOpenedAt, most recent first', async () => {
+    const repository = createMemoryRepository();
+    await repository.saveMarker({ ...doc('old', '2026-06-30T00:00:00.000Z'), lastOpenedAt: '2026-01-01T00:00:00.000Z' });
+    await repository.saveMarker({ ...doc('recent', '2026-02-01T00:00:00.000Z'), lastOpenedAt: '2026-06-01T00:00:00.000Z' });
+
+    // 'old' was written last but opened long ago; the list is about what the
+    // user was working on, not what a background save happened to touch.
+    expect((await listRecentMarkers(repository)).map((m) => m.id)).toEqual(['recent', 'old']);
+  });
+
+  it('reports a storage failure and returns an empty list', async () => {
     const repository = createMemoryRepository();
     const broken = {
       ...repository,
-      lastOpened: async () => {
+      listMarkers: async () => {
         throw new Error('IndexedDB is disabled');
       },
     };
 
-    const outcome = await restoreOrSeed(broken);
-
-    expect(outcome.restored).toBe(false);
-    expect(useMarkerStore.getState().document).not.toBeNull();
+    expect(await listRecentMarkers(broken)).toEqual([]);
     expect(usePersistenceStore.getState().lastError).toBe('IndexedDB is disabled');
+  });
+});
+
+describe('deleteMarker', () => {
+  it('removes the marker and its restore points together', async () => {
+    const repository = createMemoryRepository();
+    await repository.saveMarker(doc('m1', '2026-06-01T00:00:00.000Z'));
+    useMarkerStore.getState().loadMarker(doc('m1', '2026-06-01T00:00:00.000Z'));
+    await createRestorePoint('snap', repository, 'rp-1', '2026-06-02T00:00:00.000Z');
+
+    await repository.deleteMarker('m1');
+
+    expect(await repository.loadMarker('m1')).toBeUndefined();
+    // Snapshots of a deleted marker can never be restored into anything.
+    expect(await repository.listRestorePoints('m1')).toEqual([]);
+  });
+
+  it('leaves other markers alone', async () => {
+    const repository = createMemoryRepository();
+    await repository.saveMarker(doc('m1', '2026-06-01T00:00:00.000Z'));
+    await repository.saveMarker(doc('m2', '2026-06-02T00:00:00.000Z'));
+    await repository.deleteMarker('m1');
+    expect((await repository.listMarkers()).map((m) => m.id)).toEqual(['m2']);
   });
 });
 

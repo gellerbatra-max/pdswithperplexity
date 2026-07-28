@@ -23,6 +23,8 @@ export interface MarkerRepository {
   /** The most recently updated marker — what the app reopens on load. */
   lastOpened: () => Promise<MarkerDocument | undefined>;
   listMarkers: () => Promise<MarkerDocument[]>;
+  /** Removes the marker and every restore point belonging to it. */
+  deleteMarker: (id: string) => Promise<void>;
   addRestorePoint: (point: RestorePoint) => Promise<void>;
   listRestorePoints: (markerId: string) => Promise<RestorePoint[]>;
   /** Drop the oldest points beyond `keep`, returning how many were removed. */

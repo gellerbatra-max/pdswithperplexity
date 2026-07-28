@@ -59,6 +59,13 @@ export const createMemoryRepository = (): MemoryRepository => {
     listMarkers: async () =>
       [...markers.values()].sort((a, b) => b.lastOpenedAt.localeCompare(a.lastOpenedAt)),
 
+    deleteMarker: async (id) => {
+      markers.delete(id);
+      for (const [pointId, point] of points) {
+        if (point.markerId === id) points.delete(pointId);
+      }
+    },
+
     addRestorePoint: async (point) => {
       points.set(point.id, structuredClone(point));
       await repository.pruneRestorePoints(point.markerId, 20);

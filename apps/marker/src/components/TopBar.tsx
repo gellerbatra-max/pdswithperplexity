@@ -1,3 +1,4 @@
+import { closeMarker, type Persistence } from '@/db/persistence';
 import { useMarkerStore } from '@/store/markerStore';
 import { usePersistenceStore, type SaveState } from '@/store/persistenceStore';
 import { useUiStore } from '@/store/uiStore';
@@ -12,7 +13,7 @@ const SAVE_LABELS: Record<SaveState, string> = {
 };
 
 /** 52px header: identity on the left, history and save state on the right. */
-export const TopBar = () => {
+export const TopBar = ({ persistence }: { persistence?: Persistence | undefined }) => {
   const name = useMarkerStore((state) => state.document?.name ?? 'No marker open');
   const canUndo = useMarkerStore((state) => state.past.length > 0);
   const canRedo = useMarkerStore((state) => state.future.length > 0);
@@ -25,6 +26,14 @@ export const TopBar = () => {
 
   return (
     <header className="topbar">
+      <button
+        type="button"
+        className="topbar__button topbar__back"
+        title="Close this marker and return to the home screen"
+        onClick={() => void closeMarker(persistence)}
+      >
+        ← Markers
+      </button>
       <span className="topbar__logo">NestIQ</span>
       <span className="topbar__name">{name}</span>
 

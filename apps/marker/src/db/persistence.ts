@@ -9,7 +9,6 @@
 import type { MarkerDocument } from '@/marker/schema';
 import { useMarkerStore } from '@/store/markerStore';
 import { usePersistenceStore } from '@/store/persistenceStore';
-import { createSeedMarker } from '@/store/seedMarker';
 import { createAutoSave, type AutoSave } from './autoSave';
 import { dexieRepository } from './database';
 import type { MarkerRepository, RestorePoint } from './repository';
@@ -61,51 +60,61 @@ export const startPersistence = (
   };
 };
 
-export interface RestoreOutcome {
-  readonly marker: MarkerDocument;
-  readonly restored: boolean;
-}
-
 /**
- * Reopen the last marker, or start a new one.
+ * Open a marker and record that it was opened.
  *
- * A document that came off disk is already saved, so the caller cancels the
- * write the store subscription would otherwise schedule.
+ * `lastOpenedAt` is written straight through rather than left to the debounce:
+ * it is the one field that changes without being an edit, and it orders the
+ * home screen, so losing it to a quick close would reshuffle the list.
  */
-export const restoreOrSeed = async (
+export const openMarker = async (
+  marker: MarkerDocument,
   repository: MarkerRepository = dexieRepository,
   persistence?: Persistence,
   openedAt: string = new Date().toISOString(),
-): Promise<RestoreOutcome> => {
-  let stored: MarkerDocument | undefined;
+): Promise<MarkerDocument> => {
+  const opened: MarkerDocument = { ...marker, lastOpenedAt: openedAt };
+  useMarkerStore.getState().loadMarker(opened);
+  persistence?.autoSave.cancel();
+
   try {
-    stored = await repository.lastOpened();
+    await repository.saveMarker(opened);
+    usePersistenceStore.getState().markSaved(openedAt);
+  } catch (error) {
+    // A failed stamp is not worth blocking the open; the next edit saves.
+    usePersistenceStore
+      .getState()
+      .markFailed(error instanceof Error ? error.message : 'Could not record the open');
+  }
+
+  return opened;
+};
+
+/**
+ * Close the open marker and return to no-marker state.
+ *
+ * Flushes first: the last two seconds of work would otherwise be dropped on
+ * the way back to the home screen, which is exactly when a user assumes their
+ * changes are safe.
+ */
+export const closeMarker = async (persistence?: Persistence): Promise<void> => {
+  await persistence?.autoSave.flush();
+  useMarkerStore.getState().closeMarker();
+  usePersistenceStore.getState().setSaveState('idle');
+};
+
+/** Most recently opened first — what the home screen lists. */
+export const listRecentMarkers = async (
+  repository: MarkerRepository = dexieRepository,
+): Promise<MarkerDocument[]> => {
+  try {
+    return await repository.listMarkers();
   } catch (error) {
     usePersistenceStore
       .getState()
       .markFailed(error instanceof Error ? error.message : 'Could not read local storage');
+    return [];
   }
-
-  if (stored) {
-    // Stamp the open before handing it to the store, and write it straight
-    // through: this is the one field that changes without being an edit, so
-    // it must not ride on the debounce or it will be lost on a quick close.
-    const opened: MarkerDocument = { ...stored, lastOpenedAt: openedAt };
-    useMarkerStore.getState().loadMarker(opened);
-    persistence?.autoSave.cancel();
-    try {
-      await repository.saveMarker(opened);
-      usePersistenceStore.getState().markSaved(openedAt);
-    } catch {
-      // A failed stamp is not worth blocking the open; the next edit saves.
-      usePersistenceStore.getState().markSaved(stored.updatedAt);
-    }
-    return { marker: opened, restored: true };
-  }
-
-  const seeded = createSeedMarker();
-  useMarkerStore.getState().loadMarker(seeded);
-  return { marker: seeded, restored: false };
 };
 
 /**

@@ -53,6 +53,15 @@ export const dexieRepository: MarkerRepository = {
 
   listMarkers: () => db.markers.orderBy('lastOpenedAt').reverse().toArray(),
 
+  // Both tables in one transaction: a marker deleted without its restore
+  // points leaves snapshots nothing can ever restore into.
+  deleteMarker: async (id) => {
+    await db.transaction('rw', db.markers, db.restorePoints, async () => {
+      await db.markers.delete(id);
+      await db.restorePoints.where('markerId').equals(id).delete();
+    });
+  },
+
   addRestorePoint: async (point) => {
     await db.restorePoints.put(point);
     await dexieRepository.pruneRestorePoints(point.markerId, RESTORE_POINT_LIMIT);

@@ -34,6 +34,8 @@ export interface MarkerState {
   future: MarkerDocument[];
 
   loadMarker: (document: MarkerDocument) => void;
+  /** Return to no-marker state, which is what the home screen renders. */
+  closeMarker: () => void;
   updatePiece: (id: string, patch: Partial<Omit<PlacedPiece, 'id'>>) => void;
   addPiece: (piece: PlacedPiece) => void;
   removePiece: (id: string) => void;
@@ -93,6 +95,10 @@ export const useMarkerStore = create<MarkerState>((set) => ({
   // Opening a marker starts a new history — the previous document's snapshots
   // would restore something the user is no longer looking at.
   loadMarker: (document) => set({ document, past: [], future: [] }),
+
+  // History goes with the document: undoing back into a marker that is no
+  // longer open would resurrect it without anything having opened it.
+  closeMarker: () => set({ document: null, past: [], future: [] }),
 
   updatePiece: (id, patch) =>
     set((state) =>
