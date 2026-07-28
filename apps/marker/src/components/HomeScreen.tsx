@@ -1,67 +1,53 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { listRecentMarkers, openMarker, type Persistence } from '@/db/persistence';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { dexieRepository } from '@/db/database';
+import { listRecentMarkers, openMarker, type Persistence } from '@/db/persistence';
 import { importDxfFile } from '@/io/dxfImporter';
+import { parseMarker } from '@/io/markerJson';
 import { createMarker, duplicateMarker } from '@/marker/newMarker';
-import { consumption, markerLength, markerStatus, utilization } from '@/marker/selectors';
+import { arrangeRecent, SORT_LABELS, summarise, type RecentSort } from '@/marker/recent';
 import type { MarkerDocument } from '@/marker/schema';
-import { utilisationBand } from '@/marker/utilisation';
 import { useUiStore } from '@/store/uiStore';
-import { drawMarkerThumbnail, readThumbnailTokens, type ThumbnailTokens } from './markerThumbnail';
+import { MarkerCard } from './MarkerCard';
+import { readThumbnailTokens, type ThumbnailTokens } from './markerThumbnail';
 import { NewMarkerDialog } from './NewMarkerDialog';
 
 /**
- * What the app shows when no marker is open.
+ * The start hub: what the app shows when no marker is open.
  *
- * Two ways in — a DXF or a blank marker — and everything already worked on,
- * most recently opened first. The list is read from the same database the app
- * saves to, so a marker appears here the moment it exists.
+ * Three ways in — drop a file, pick a file, or start blank — and everything
+ * already worked on, searchable and sortable. The list is read from the same
+ * database the app saves to, so a marker appears here the moment it exists.
  */
 
-const RECENT_LIMIT = 24;
+const RECENT_LIMIT = 60;
+const DXF = '.dxf';
+const RUL = '.rul';
+const MARKER_JSON = '.marker.json';
 
-const formatWhen = (iso: string): string => {
-  const then = new Date(iso).getTime();
-  if (!Number.isFinite(then)) return 'never opened';
-  const minutes = Math.round((Date.now() - then) / 60000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} h ago`;
-  const days = Math.round(hours / 24);
-  if (days < 30) return `${days} d ago`;
-  return new Date(iso).toLocaleDateString();
-};
-
-const Thumbnail = ({ marker, tokens }: { marker: MarkerDocument; tokens: ThumbnailTokens }) => {
-  const ref = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = ref.current;
-    if (canvas) drawMarkerThumbnail(canvas, marker, tokens);
-  }, [marker, tokens]);
-
-  return <canvas className="card__thumb" ref={ref} aria-hidden="true" />;
-};
+const SORTS: readonly RecentSort[] = ['opened', 'name', 'utilisation', 'created'];
 
 export const HomeScreen = ({ persistence }: { persistence?: Persistence | undefined }) => {
-  const [recent, setRecent] = useState<MarkerDocument[]>([]);
+  const [all, setAll] = useState<MarkerDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [dropping, setDropping] = useState(false);
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<RecentSort>('opened');
   const fileRef = useRef<HTMLInputElement>(null);
   const [tokens] = useState<ThumbnailTokens>(() => readThumbnailTokens());
 
   const refresh = useCallback(async () => {
-    const markers = await listRecentMarkers();
-    setRecent(markers.slice(0, RECENT_LIMIT));
+    setAll((await listRecentMarkers()).slice(0, RECENT_LIMIT));
     setLoading(false);
   }, []);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const shown = useMemo(() => arrangeRecent(all, { query, sort }), [all, query, sort]);
+  const totals = useMemo(() => summarise(all), [all]);
 
   const open = useCallback(
     async (marker: MarkerDocument) => {
@@ -71,14 +57,38 @@ export const HomeScreen = ({ persistence }: { persistence?: Persistence | undefi
     [persistence],
   );
 
-  const onDxfChosen = useCallback(
-    async (files: FileList | null) => {
-      const dxf = [...(files ?? [])].find((file) => file.name.toLowerCase().endsWith('.dxf'));
-      const rul = [...(files ?? [])].find((file) => file.name.toLowerCase().endsWith('.rul'));
-      if (!dxf) return;
+  /**
+   * Take whatever was dropped or chosen.
+   *
+   * A `.marker.json` is a whole marker, so it opens as itself; a DXF is a bag
+   * of pieces, so it becomes a new marker named after the file.
+   */
+  const ingest = useCallback(
+    async (files: readonly File[]) => {
+      const native = files.find((file) => file.name.toLowerCase().endsWith(MARKER_JSON));
+      const dxf = files.find((file) => file.name.toLowerCase().endsWith(DXF));
+      const rul = files.find((file) => file.name.toLowerCase().endsWith(RUL));
+      const ui = useUiStore.getState();
+
+      if (!native && !dxf) {
+        ui.setStatus('warn', 'Drop a .dxf or a .marker.json file');
+        return;
+      }
 
       setBusy('Reading file…');
       try {
+        if (native) {
+          const parsed = parseMarker(await native.text());
+          // Re-opening a file that is already here must not silently overwrite
+          // the copy in the database, so it arrives as a duplicate instead.
+          const clash = await dexieRepository.loadMarker(parsed.id);
+          const marker = clash ? duplicateMarker(parsed) : parsed;
+          await open(marker);
+          ui.setStatus('ok', clash ? `Opened a copy of ${parsed.name}` : `Opened ${marker.name}`);
+          return;
+        }
+
+        if (!dxf) return;
         const [dxfText, rulText] = await Promise.all([dxf.text(), rul?.text()]);
         const outcome = await importDxfFile({
           dxfText,
@@ -86,27 +96,21 @@ export const HomeScreen = ({ persistence }: { persistence?: Persistence | undefi
           onProgress: (percent) => setBusy(`Importing… ${percent}%`),
         });
 
-        // The file name is the best name available; a marker called
-        // "Untitled" among twenty others is no name at all.
-        const marker = createMarker({
-          name: dxf.name.replace(/\.dxf$/i, ''),
-          trayPieces: outcome.pieces,
-        });
-        await open(marker);
+        // The file name is the best name available; "Untitled" among twenty
+        // others is no name at all.
+        await open(
+          createMarker({ name: dxf.name.replace(/\.dxf$/i, ''), trayPieces: outcome.pieces }),
+        );
 
         const summary = `Imported ${outcome.pieces.length} piece(s) from ${dxf.name}`;
         if (outcome.warnings.length > 0) {
-          useUiStore
-            .getState()
-            .setStatus('warn', `${summary} — ${outcome.warnings.length} warning(s)`);
+          ui.setStatus('warn', `${summary} — ${outcome.warnings.length} warning(s)`);
           for (const warning of outcome.warnings) console.warn('[dxf]', warning);
         } else {
-          useUiStore.getState().setStatus('ok', summary);
+          ui.setStatus('ok', summary);
         }
       } catch (error) {
-        useUiStore
-          .getState()
-          .setStatus('error', error instanceof Error ? error.message : 'DXF import failed');
+        ui.setStatus('error', error instanceof Error ? error.message : 'Could not open that file');
       } finally {
         setBusy(null);
       }
@@ -114,13 +118,37 @@ export const HomeScreen = ({ persistence }: { persistence?: Persistence | undefi
     [open],
   );
 
+  const empty = !loading && all.length === 0;
+
   return (
-    <div className="home">
+    <div
+      className="home"
+      data-dropping={dropping || undefined}
+      onDragOver={(event) => {
+        event.preventDefault();
+        setDropping(true);
+      }}
+      onDragLeave={(event) => {
+        // Only when the pointer leaves the hub itself, not on every child.
+        // `relatedTarget` is typed `EventTarget | null`; in a DOM drag it is
+        // always an element or null, and `contains` wants a `Node | null`.
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropping(false);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        setDropping(false);
+        void ingest([...event.dataTransfer.files]);
+      }}
+    >
       <header className="home__header">
-        <div>
-          <h1 className="home__title">NestIQ Marker</h1>
-          <p className="home__subtitle">Marker making for apparel factories.</p>
-        </div>
+        <h1 className="home__title">NestIQ Marker</h1>
+        <p className="home__subtitle">
+          {empty
+            ? 'Marker making for apparel factories. Everything stays on this machine.'
+            : `${totals.markers} marker${totals.markers === 1 ? '' : 's'} · ${totals.pieces} piece${
+                totals.pieces === 1 ? '' : 's'
+              } placed · ${totals.made} complete`}
+        </p>
       </header>
 
       <div className="home__actions">
@@ -130,8 +158,10 @@ export const HomeScreen = ({ persistence }: { persistence?: Persistence | undefi
           onClick={() => fileRef.current?.click()}
           disabled={busy !== null}
         >
-          <span className="home__action-title">Open DXF file</span>
-          <span className="home__action-note">Import pieces from AAMA or ASTM DXF</span>
+          <span className="home__action-title">Open a file</span>
+          <span className="home__action-note">
+            AAMA or ASTM DXF, or a .marker.json you exported
+          </span>
         </button>
 
         <button
@@ -147,113 +177,106 @@ export const HomeScreen = ({ persistence }: { persistence?: Persistence | undefi
         <input
           ref={fileRef}
           type="file"
-          accept=".dxf,.rul"
+          accept=".dxf,.rul,.json"
           multiple
           className="home__file"
           onChange={(event) => {
-            void onDxfChosen(event.target.files);
+            void ingest([...(event.target.files ?? [])]);
             // Clear it, or choosing the same file twice fires no change event.
             event.target.value = '';
           }}
         />
       </div>
 
-      {busy ? <p className="home__busy">{busy}</p> : null}
+      <p className="home__hint">
+        {busy ?? 'You can also drag a file anywhere onto this screen.'}
+      </p>
 
       <section className="home__recent">
-        <h2 className="home__section-title">Recent markers</h2>
+        <header className="home__recent-header">
+          <h2 className="home__section-title">Recent markers</h2>
+
+          {all.length > 0 ? (
+            <div className="home__controls">
+              <input
+                type="search"
+                className="home__search"
+                placeholder="Search markers…"
+                value={query}
+                aria-label="Search markers"
+                onChange={(event) => setQuery(event.target.value)}
+              />
+              <label className="home__sort">
+                <span className="field__label">Sort</span>
+                <select
+                  className="field__input"
+                  value={sort}
+                  aria-label="Sort markers"
+                  onChange={(event) => {
+                    const next = SORTS.find((candidate) => candidate === event.target.value);
+                    if (next) setSort(next);
+                  }}
+                >
+                  {SORTS.map((option) => (
+                    <option key={option} value={option}>
+                      {SORT_LABELS[option]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ) : null}
+        </header>
 
         {loading ? (
           <p className="home__empty">Reading local storage…</p>
-        ) : recent.length === 0 ? (
-          <p className="home__empty">
-            Nothing here yet. Open a DXF or start a blank marker to begin.
-          </p>
+        ) : empty ? (
+          <div className="home__blank">
+            <p className="home__blank-title">No markers yet</p>
+            <p className="home__blank-note">
+              Open a DXF to bring in an order&apos;s pieces, or start a blank marker and set the
+              fabric width yourself. Markers you make appear here, saved in this browser.
+            </p>
+          </div>
+        ) : shown.length === 0 ? (
+          <div className="home__blank">
+            <p className="home__blank-title">Nothing matches “{query}”</p>
+            <p className="home__blank-note">
+              Search covers the marker name, its order model and its status.
+            </p>
+            <button type="button" className="topbar__button" onClick={() => setQuery('')}>
+              Clear search
+            </button>
+          </div>
         ) : (
           <ul className="home__grid">
-            {recent.map((marker) => {
-              const percent = utilization(marker);
-              const status = markerStatus(marker);
-              return (
-                <li key={marker.id} className="card">
-                  <button
-                    type="button"
-                    className="card__open"
-                    onClick={() => void open(marker)}
-                    title={`Open ${marker.name}`}
-                  >
-                    <Thumbnail marker={marker} tokens={tokens} />
-                    <span className="card__name">{marker.name}</span>
-                    <span className="card__meta">
-                      {marker.pieces.length} piece{marker.pieces.length === 1 ? '' : 's'} ·{' '}
-                      {marker.fabricWidth} cm · {formatWhen(marker.lastOpenedAt)}
-                    </span>
-                    <span className="card__stats">
-                      <span className="card__util" data-band={utilisationBand(percent)}>
-                        {percent.toFixed(1)}%
-                      </span>
-                      <span className="card__length">{markerLength(marker).toFixed(0)} cm</span>
-                      <span className="card__consumption">
-                        {consumption(marker).toFixed(2)} m
-                      </span>
-                      <span className="ribbon__status" data-status={status}>
-                        {status}
-                      </span>
-                    </span>
-                  </button>
-
-                  <div className="card__actions">
-                    <button
-                      type="button"
-                      className="card__action"
-                      title="Duplicate this marker"
-                      onClick={async () => {
-                        await dexieRepository.saveMarker(duplicateMarker(marker));
-                        await refresh();
-                      }}
-                    >
-                      Duplicate
-                    </button>
-
-                    {confirmDelete === marker.id ? (
-                      <>
-                        <button
-                          type="button"
-                          className="card__action card__action--danger"
-                          onClick={async () => {
-                            await dexieRepository.deleteMarker(marker.id);
-                            setConfirmDelete(null);
-                            await refresh();
-                          }}
-                        >
-                          Delete for good
-                        </button>
-                        <button
-                          type="button"
-                          className="card__action"
-                          onClick={() => setConfirmDelete(null)}
-                        >
-                          Cancel
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        className="card__action"
-                        // Deleting a marker takes its restore points with it,
-                        // so there is nothing left to undo from. Ask first.
-                        onClick={() => setConfirmDelete(marker.id)}
-                      >
-                        Delete
-                      </button>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
+            {shown.map((marker) => (
+              <MarkerCard
+                key={marker.id}
+                marker={marker}
+                tokens={tokens}
+                onOpen={() => void open(marker)}
+                onRename={async (name) => {
+                  await dexieRepository.saveMarker({ ...marker, name });
+                  await refresh();
+                }}
+                onDuplicate={async () => {
+                  await dexieRepository.saveMarker(duplicateMarker(marker));
+                  await refresh();
+                  useUiStore.getState().setStatus('ok', `Duplicated ${marker.name}`);
+                }}
+                onDelete={async () => {
+                  await dexieRepository.deleteMarker(marker.id);
+                  await refresh();
+                  useUiStore.getState().setStatus('info', `Deleted ${marker.name}`);
+                }}
+              />
+            ))}
           </ul>
         )}
       </section>
+
+      {dropping ? <div className="home__dropzone">Drop to open</div> : null}
 
       {dialogOpen ? (
         <NewMarkerDialog

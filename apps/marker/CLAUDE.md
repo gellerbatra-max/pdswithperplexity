@@ -1134,6 +1134,54 @@ put its label over its own hollow; fitting the true outline needs the
 largest inscribed rectangle, which is a lot of work for the few pieces
 it would change.
 
+### Phase 1 Step 9 — Marker home and file management
+
+The home screen from Step 6 could open and delete. It is now the file
+manager for a factory's markers: search, sort, drag-to-open, and open /
+rename / duplicate / delete on every card.
+
+**Actions are always visible, never revealed on hover.** A hover-only
+action does not exist on a touch screen and is undiscoverable on a
+mouse — the user has to find it by accident. Four labelled buttons on
+every card cost a row of space and remove the guessing.
+
+**Re-opening a `.marker.json` that is already here arrives as a copy.**
+The file carries the id it was exported with, so writing it back would
+silently overwrite whatever that id now holds — which is the version
+with the last hour's work in it. `ingest` checks for the id first and
+duplicates on a clash. A DXF has no such question: it is a bag of
+pieces, so it always becomes a new marker named after the file.
+
+`marker/recent.ts` is pure and holds the rules that decide what a user
+sees first:
+- Filter, then sort. Search covers name, order model and status —
+  the three things a card shows, so a search that fails is a search for
+  something not on screen.
+- Names sort with `localeCompare`, not by code point: a list that puts
+  "Zebra" before "apple" reads as broken.
+- Utilisation sorts best first — the useful question is "which of these
+  went well", not "which went worst".
+- Timestamps are ISO 8601, so a string comparison is chronological.
+
+**Two empty states, not one.** "No markers yet" explains how to get
+one; "Nothing matches" names the query, says what search covers, and
+offers to clear it. A single empty state would tell a user with twenty
+markers that they have none.
+
+Drag-and-drop is on the whole hub rather than a target rectangle, and
+`dragleave` only clears when the pointer leaves the hub itself —
+checking every child fires a leave on each card the pointer crosses and
+the overlay strobes.
+
+✓ Verify: both empty states render and read correctly.
+✓ Verify: search filters, and all four sorts order as described.
+✓ Verify: rename commits on Enter, duplicate appends "(copy)", delete
+  asks first.
+✓ Verify: a `.marker.json` opens as itself, and a second time as a copy
+  without touching the original.
+✓ Verify: home-first navigation is unchanged; labels and rendering are
+  untouched.
+
 ---
 
 ## Replying to Claude After Each Step
