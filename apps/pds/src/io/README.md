@@ -92,10 +92,20 @@ real file on hand misbehaves in these ways):
   still imports closed, because the model has no open pieces, but the closing
   edge is then the importer's invention and `boundary-closed-by-importer`
   says so, with the edge's length.
-- **An INSERT carrying scale or rotation refuses the import** (error, was a
-  warning). A piece placed unscaled when its INSERT says ×2 is not a degraded
-  import, it is a different garment that looks plausible on screen. No vendor
-  export on hand carries a transform, so nothing real is turned away.
+- **An INSERT's scale and rotation are applied** as a real affine transform —
+  scale then rotate about the base point, then translate to the insertion
+  point, which is DXF's own composition order. A negative scale is a mirror
+  and reverses every sweep with it (bulge sign, arc handedness). Rotation is
+  rigid, tested by every edge length surviving it. The transform is reported
+  (`insert-transform-applied`), and z-scale is noted as dropped since this
+  importer reads flat 2D.
+
+  One case is still refused: a **non-uniform** scale over a block carrying
+  circular-arc geometry. `ArcGeometry` holds a radius, and a non-uniform scale
+  turns circles into ellipses, so importing it would mean faking the radius or
+  silently chording the curve. `insert-transform-unrepresentable` drops that
+  piece instead. On straight-line blocks a non-uniform scale is fine and is
+  applied — lines and cubics map cleanly under any affine.
 - **Self-contradicting metadata is called ambiguous.** A field stated twice
   with different values gets `metadata-field-conflict` naming both; an exact
   repeat stays silent. First statement still wins, as before.

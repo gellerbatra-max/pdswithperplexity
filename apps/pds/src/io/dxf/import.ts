@@ -700,14 +700,68 @@ const resolvePieces = (
       bulges: 0,
     };
 
+    /* --- The INSERT's affine transform ---------------------------------- *
+     *
+     * DXF composes an INSERT as: translate to the base point, scale, rotate,
+     * translate to the insertion point — scale before rotation, both about
+     * the base point. Identity in every vendor export on hand, so the
+     * identity path below is arithmetically exact (x·1 − y·0 is bit-identical
+     * to x), which is what keeps the three real fixtures byte-identical.
+     *
+     * One honesty cliff: a non-uniform scale (|sx| ≠ |sy|) turns circles
+     * into ellipses, and `ArcGeometry` cannot hold an ellipse. For a block
+     * whose geometry is all lines and cubics the transform is still exact —
+     * both map cleanly under any affine — but a block carrying arc geometry
+     * (a bulge or an ARC entity) under a non-uniform scale cannot be
+     * represented without either faking the radius or silently chording the
+     * curve. That piece is refused with an error instead.
+     */
+    const { xScale, yScale, zScale, rotationDegrees } = insert;
+    const mirrored = xScale * yScale < 0;
+    const uniformScale = Math.abs(Math.abs(xScale) - Math.abs(yScale)) <= 1e-9;
+    const arcScale = Math.abs(xScale);
+    const hasTransform = xScale !== 1 || yScale !== 1 || rotationDegrees !== 0;
+    const insertRadians = (rotationDegrees * Math.PI) / 180;
+    const cos = Math.cos(insertRadians);
+    const sin = Math.sin(insertRadians);
+
+    const blockHasArcGeometry =
+      block.arcs.length > 0 ||
+      block.polylines.some((p) => p.vertices.some((v) => Math.abs(v.bulge) > 1e-12));
+    if (hasTransform && !uniformScale && blockHasArcGeometry) {
+      issues.push({
+        severity: 'error',
+        code: 'insert-transform-unrepresentable',
+        message: `"${block.name}": its INSERT scales non-uniformly (${xScale} × ${yScale}) and the block carries circular-arc geometry. A non-uniform scale turns those arcs into ellipses, which this model cannot hold — the piece is refused rather than imported with faked radii or silently flattened curves.`,
+      });
+      continue;
+    }
+    if (hasTransform) {
+      issues.push({
+        severity: 'info',
+        code: 'insert-transform-applied',
+        message: `"${block.name}": INSERT transform applied — scale ${xScale} × ${yScale}${rotationDegrees !== 0 ? `, rotation ${rotationDegrees}°` : ''}${mirrored ? ' (a mirror: the piece is reflected)' : ''}.`,
+      });
+    }
+    if (zScale !== 1) {
+      issues.push({
+        severity: 'info',
+        code: 'insert-zscale-ignored',
+        message: `"${block.name}": INSERT z-scale ${zScale} ignored — this importer reads flat 2D geometry and drops z throughout.`,
+      });
+    }
+
     /** Block-local DXF coordinates → placed, millimetre, y-down piece space. */
-    const toPieceSpace = (v: Vec2): Vec2 => ({
-      x: (v.x - block.basePoint.x + insert.insertionPoint.x) * mmPerUnit,
+    const toPieceSpace = (v: Vec2): Vec2 => {
+      const localX = (v.x - block.basePoint.x) * xScale;
+      const localY = (v.y - block.basePoint.y) * yScale;
+      const worldX = localX * cos - localY * sin + insert.insertionPoint.x;
+      const worldY = localX * sin + localY * cos + insert.insertionPoint.y;
       // DXF is y-up; this app's piece space is y-down (piece.ts). Negating Y
       // here — once, at the file boundary — is what keeps "up" in the source
       // pattern "up" on screen, rather than importing every piece upside down.
-      y: -(v.y - block.basePoint.y + insert.insertionPoint.y) * mmPerUnit,
-    });
+      return { x: worldX * mmPerUnit, y: -worldY * mmPerUnit };
+    };
 
     /**
      * Curve entities become boundary runs so they flow through exactly the
@@ -838,7 +892,11 @@ const resolvePieces = (
      */
     const toPieceVertex = (v: RawVertex): RawVertex => ({
       position: toPieceSpace(v.position),
-      bulge: v.bulge,
+      // A bulge is `tan(theta/4)` — an *angle*, so scale and rotation leave
+      // it alone. A mirror does not: reflecting reverses the sweep, and the
+      // sign of the bulge is the sweep. `xScale * yScale < 0` is exactly the
+      // determinant test for a reflection.
+      bulge: mirrored ? -v.bulge : v.bulge,
       ...(v.geometry === undefined
         ? {}
         : v.geometry.kind === 'cubic'
@@ -849,7 +907,23 @@ const resolvePieces = (
                 control2: toPieceSpace(v.geometry.control2),
               },
             }
-          : { geometry: v.geometry }),
+          : v.geometry.kind === 'arc'
+            ? {
+                geometry: {
+                  ...v.geometry,
+                  // A pre-resolved ARC's radius arrives in the file's own
+                  // units, unlike its endpoints, which `toPieceSpace` has
+                  // already converted. It needs the same journey: the unit
+                  // factor and the INSERT's scale. Missing this leaves the
+                  // radius in file units while the chord is in millimetres —
+                  // invisible whenever the factor is 1 (as it is in every
+                  // millimetre file), and a badly wrong arc the moment it
+                  // is not.
+                  radius: v.geometry.radius * mmPerUnit * arcScale,
+                  clockwise: mirrored ? !v.geometry.clockwise : v.geometry.clockwise,
+                },
+              }
+            : { geometry: v.geometry }),
     });
 
     const cleaned = cleanRing(chain.vertices.map(toPieceVertex), issues, block.name);

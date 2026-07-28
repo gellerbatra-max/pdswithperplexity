@@ -529,37 +529,39 @@ const readBlocksSection = (cursor: TokenCursor, issues: ConversionIssue[]): Map<
 export interface RawInsert {
   readonly blockName: string;
   readonly insertionPoint: Vec2;
+  /** Group 41/42/43; 1 when unstated, per the DXF default. */
+  readonly xScale: number;
+  readonly yScale: number;
+  readonly zScale: number;
+  /** Group 50, degrees counter-clockwise in the file's own y-up frame. */
+  readonly rotationDegrees: number;
 }
 
-const readInsert = (cursor: TokenCursor, issues: ConversionIssue[]): RawInsert => {
+/**
+ * Reads an INSERT's placement *and* its transform, judging neither. Whether a
+ * scale can be represented in the piece model (a non-uniform one turns arcs
+ * into ellipses, which the model cannot hold) is an interpretation question,
+ * and it lives in `import.ts` with the rest of them.
+ */
+const readInsert = (cursor: TokenCursor): RawInsert => {
   let blockName = '';
   let point: Vec2 = { x: 0, y: 0 };
-  const transform: DxfToken[] = [];
+  let xScale = 1;
+  let yScale = 1;
+  let zScale = 1;
+  let rotationDegrees = 0;
   while (!cursor.done() && cursor.peek()!.code !== 0) {
     const token = cursor.next();
     if (token.code === 2) blockName = token.value;
     else if (token.code === 10) point = { ...point, x: tokenNumber(token) };
     else if (token.code === 20) point = { ...point, y: tokenNumber(token) };
-    else if ([41, 42, 43, 44, 50].includes(token.code)) transform.push(token);
-    // 8 (layer), 30 (z) — not used.
+    else if (token.code === 41) xScale = tokenNumber(token);
+    else if (token.code === 42) yScale = tokenNumber(token);
+    else if (token.code === 43) zScale = tokenNumber(token);
+    else if (token.code === 50) rotationDegrees = tokenNumber(token);
+    // 8 (layer), 30 (z), 44/45 (column/row spacing) — not used.
   }
-  if (transform.length > 0) {
-    // An error, not a warning, and deliberately so: a piece placed unscaled
-    // or unrotated when its INSERT says otherwise is not a degraded import,
-    // it is a different garment that looks plausible on screen. Refusing is
-    // the only honest option until transforms are actually applied. No
-    // vendor pattern export on hand carries one (125 files surveyed — the
-    // only INSERT transforms found anywhere were in another tool's synthetic
-    // fixtures), so nothing real is being turned away.
-    issues.push({
-      severity: 'error',
-      code: 'insert-transform-unsupported',
-      message: `INSERT of "${blockName}" carries a scale or rotation (group code(s) ${transform
-        .map((t) => t.code)
-        .join(', ')}). Applying it is not implemented, and importing the block unscaled and unrotated would produce wrong geometry that looks right — so this file is refused rather than imported wrong.`,
-    });
-  }
-  return { blockName, insertionPoint: point };
+  return { blockName, insertionPoint: point, xScale, yScale, zScale, rotationDegrees };
 };
 
 interface RawEntities {
@@ -574,7 +576,7 @@ const readEntitiesSection = (cursor: TokenCursor, issues: ConversionIssue[]): Ra
   while (!cursor.done() && !cursor.at('ENDSEC')) {
     if (cursor.at('INSERT')) {
       cursor.next();
-      inserts.push(readInsert(cursor, issues));
+      inserts.push(readInsert(cursor));
     } else if (cursor.at('TEXT')) {
       cursor.next();
       texts.push(readText(cursor));

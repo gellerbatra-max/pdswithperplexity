@@ -1113,8 +1113,8 @@ check(
     'ok',
   );
 
-  // An INSERT that scales: refused, not imported wrong. Spliced into the real
-  // 5109S fixture so everything else about the file is genuine.
+  // An INSERT that scales is now applied, not refused. Spliced into the real
+  // 5109S fixture so everything else about the file stays genuine.
   {
     // Scanning for "the next 0 line" is a trap here — coordinate *values* are
     // 0 too. The splice anchors on the INSERT's block-name line instead, which
@@ -1124,23 +1124,94 @@ check(
     const anchor = `${eol}INSERT${eol}8${eol}1${eol}2${eol}AW27-213 -COST-5109S${eol}`;
     const at = fixture.indexOf(anchor);
     check('fixture 1 has an INSERT to splice a transform into', at > 0, String(at));
-    const scaled =
-      fixture.slice(0, at + anchor.length) + `41${eol}2.0${eol}` + fixture.slice(at + anchor.length);
-    const result = importDxfWithDiagnostics(scaled, { flavour: 'aama', assumeUnit: 'mm' });
+    const splice = (fields: string): string =>
+      fixture.slice(0, at + anchor.length) + fields + fixture.slice(at + anchor.length);
+
+    const plain = importDxfWithDiagnostics(fixture, { flavour: 'aama', assumeUnit: 'mm' });
+    const first = (d: PatternDocument) => d.pieces[0]!;
+    const bbox = (d: PatternDocument) => {
+      const pts = first(d).points.map((p) => p.position);
+      const xs = pts.map((p) => p.x);
+      const ys = pts.map((p) => p.y);
+      return {
+        w: Math.max(...xs) - Math.min(...xs),
+        h: Math.max(...ys) - Math.min(...ys),
+      };
+    };
+
+    /* --- Scale ------------------------------------------------------------ */
+    const scaled = importDxfWithDiagnostics(splice(`41${eol}2.0${eol}42${eol}2.0${eol}`), {
+      flavour: 'aama',
+      assumeUnit: 'mm',
+    });
+    check('a scaled INSERT imports rather than being refused', scaled.document.pieces.length === plain.document.pieces.length && !scaled.issues.some((i) => i.severity === 'error'), scaled.issues.filter((i) => i.severity === 'error').map((i) => i.code).join(',') || 'no errors');
     check(
-      'a scaled INSERT is an error naming the refusal, not a warning past wrong geometry',
-      result.issues.some(
-        (i) => i.code === 'insert-transform-unsupported' && i.severity === 'error' && i.message.includes('refused'),
-      ),
-      result.issues.find((i) => i.code === 'insert-transform-unsupported')?.message ?? 'missing',
+      'the scale is actually applied — the piece is twice the size',
+      Math.abs(bbox(scaled.document).w - bbox(plain.document).w * 2) < 1e-6 && Math.abs(bbox(scaled.document).h - bbox(plain.document).h * 2) < 1e-6,
+      `${bbox(scaled.document).w.toFixed(3)}x${bbox(scaled.document).h.toFixed(3)} vs plain ${bbox(plain.document).w.toFixed(3)}x${bbox(plain.document).h.toFixed(3)}`,
     );
-    let threw = false;
-    try {
-      importDxf(scaled, { flavour: 'aama', assumeUnit: 'mm' });
-    } catch {
-      threw = true;
+    check(
+      'a transformed piece imports differently from an untransformed one',
+      pieceShape(scaled.document) !== pieceShape(plain.document),
+      'shapes differ',
+    );
+    check('applying a transform is reported', scaled.issues.some((i) => i.code === 'insert-transform-applied' && i.message.includes('scale 2')), scaled.issues.find((i) => i.code === 'insert-transform-applied')?.message ?? 'missing');
+
+    /* --- Rotation --------------------------------------------------------- */
+    // 90 degrees about the base point: a bounding box swaps its sides, and
+    // lengths are preserved. Both are checked, because a rotation that also
+    // scaled would keep the swap and break the lengths.
+    const rotated = importDxfWithDiagnostics(splice(`50${eol}90.0${eol}`), {
+      flavour: 'aama',
+      assumeUnit: 'mm',
+    });
+    check('a rotated INSERT imports rather than being refused', !rotated.issues.some((i) => i.severity === 'error'), 'ok');
+    check(
+      'the rotation is actually applied — a 90-degree turn swaps the bounding box',
+      Math.abs(bbox(rotated.document).w - bbox(plain.document).h) < 1e-6 && Math.abs(bbox(rotated.document).h - bbox(plain.document).w) < 1e-6,
+      `${bbox(rotated.document).w.toFixed(3)}x${bbox(rotated.document).h.toFixed(3)} vs plain ${bbox(plain.document).w.toFixed(3)}x${bbox(plain.document).h.toFixed(3)}`,
+    );
+    {
+      // Rotation is rigid: every edge keeps its length.
+      const edge = (d: PatternDocument, i: number) => {
+        const p = first(d);
+        const s = p.segments[i]!;
+        const a = p.points.find((x) => x.id === s.from)!.position;
+        const b = p.points.find((x) => x.id === s.to)!.position;
+        return Math.hypot(b.x - a.x, b.y - a.y);
+      };
+      const preserved = first(plain.document).segments.every((_, i) => Math.abs(edge(rotated.document, i) - edge(plain.document, i)) < 1e-9);
+      check('rotation preserves every edge length, as a rigid motion must', preserved, 'ok');
     }
-    check('…and importDxf refuses the whole file', threw, String(threw));
+    check('rotation is reported with its angle', rotated.issues.some((i) => i.code === 'insert-transform-applied' && i.message.includes('90')), 'ok');
+
+    /* --- Mirror ----------------------------------------------------------- */
+    const mirrored = importDxfWithDiagnostics(splice(`41${eol}-1.0${eol}42${eol}1.0${eol}`), {
+      flavour: 'aama',
+      assumeUnit: 'mm',
+    });
+    check(
+      'a negative scale mirrors the piece and says so',
+      mirrored.issues.some((i) => i.code === 'insert-transform-applied' && i.message.includes('mirror')) &&
+        Math.abs(bbox(mirrored.document).w - bbox(plain.document).w) < 1e-6,
+      mirrored.issues.find((i) => i.code === 'insert-transform-applied')?.message ?? 'missing',
+    );
+
+    /* --- The honesty cliff ------------------------------------------------ */
+    // A non-uniform scale turns arcs into ellipses, which the model cannot
+    // hold. 5109S is all straight lines, so a non-uniform scale is fine there
+    // — proving the refusal is about arc geometry, not about scaling.
+    const nonUniformStraight = importDxfWithDiagnostics(splice(`41${eol}2.0${eol}42${eol}3.0${eol}`), {
+      flavour: 'aama',
+      assumeUnit: 'mm',
+    });
+    check(
+      'a non-uniform scale is fine on a block with no arcs — lines map cleanly under any affine',
+      !nonUniformStraight.issues.some((i) => i.code === 'insert-transform-unrepresentable') &&
+        Math.abs(bbox(nonUniformStraight.document).w - bbox(plain.document).w * 2) < 1e-6 &&
+        Math.abs(bbox(nonUniformStraight.document).h - bbox(plain.document).h * 3) < 1e-6,
+      `${bbox(nonUniformStraight.document).w.toFixed(2)}x${bbox(nonUniformStraight.document).h.toFixed(2)}`,
+    );
   }
 
   // A field stated twice with different values is ambiguity, reported.
@@ -1177,6 +1248,123 @@ check(
     );
   }
 
+}
+
+/* --- 30b. The one transform the model cannot hold --------------------------
+ *
+ * A non-uniform scale turns a circle into an ellipse, and `ArcGeometry` holds
+ * radius + flags — there is no ellipse in it. On a block of straight lines
+ * that is irrelevant (§ 30 proves 2x3 works there); on a block carrying arc
+ * geometry it is the difference between importing the piece and inventing a
+ * radius. The synthetic bulge fixture is the smallest block with a real arc.
+ */
+
+{
+  const arcFixture = readFileSync(
+    fileURLToPath(new URL('./fixtures/dxf/synthetic-curves-bulge.dxf', import.meta.url)),
+    'utf8',
+  );
+  const eol = arcFixture.includes('\r\n') ? '\r\n' : '\n';
+  const anchor = `${eol}INSERT${eol}8${eol}1${eol}2${eol}BULGE-SQUARE${eol}`;
+  const at = arcFixture.indexOf(anchor);
+  check('the bulge fixture has an INSERT to splice a transform into', at > 0, String(at));
+  const splice = (fields: string): string =>
+    arcFixture.slice(0, at + anchor.length) + fields + arcFixture.slice(at + anchor.length);
+
+  const uniform = importDxfWithDiagnostics(splice(`41${eol}3.0${eol}42${eol}3.0${eol}`), {
+    flavour: 'aama',
+    assumeUnit: 'mm',
+  });
+  const plainArc = importDxfWithDiagnostics(arcFixture, { flavour: 'aama', assumeUnit: 'mm' });
+  const radiusOf = (r: typeof plainArc): number => {
+    const seg = r.document.pieces[0]!.segments.find((s) => s.geometry.kind === 'arc')!;
+    return (seg.geometry as { radius: number }).radius;
+  };
+  check(
+    'a uniform scale carries the arc with it — the radius scales too',
+    Math.abs(radiusOf(uniform) - radiusOf(plainArc) * 3) < 1e-9,
+    `${radiusOf(uniform)} vs ${radiusOf(plainArc)} x 3`,
+  );
+
+  {
+    /*
+     * The same check against a *pre-resolved* ARC entity, which is a
+     * different code path from a bulge and has to be exercised separately.
+     * A bulge-derived arc gets its radius from `bulgeToArc` on endpoints
+     * that are already scaled, so it follows the transform for free. An ARC
+     * entity's radius arrives as its own number in the file's units and has
+     * to be carried deliberately — the check above passes even when that
+     * carrying is deleted, which is exactly why this one exists.
+     */
+    const arcEntity = readFileSync(
+      fileURLToPath(new URL('./fixtures/dxf/synthetic-curves-arc.dxf', import.meta.url)),
+      'utf8',
+    );
+    const arcAnchor = `${eol}INSERT${eol}8${eol}1${eol}2${eol}ARC-CHAIN${eol}`;
+    const arcAt = arcEntity.indexOf(arcAnchor);
+    check('the ARC-entity fixture has an INSERT to splice into', arcAt > 0, String(arcAt));
+    const scaledArc = importDxfWithDiagnostics(
+      arcEntity.slice(0, arcAt + arcAnchor.length) + `41${eol}3.0${eol}42${eol}3.0${eol}` + arcEntity.slice(arcAt + arcAnchor.length),
+      { flavour: 'aama', assumeUnit: 'mm' },
+    );
+    const plainArcEntity = importDxfWithDiagnostics(arcEntity, { flavour: 'aama', assumeUnit: 'mm' });
+    const arcRadius = (r: typeof plainArcEntity): number => {
+      const seg = r.document.pieces[0]!.segments.find((s) => s.geometry.kind === 'arc')!;
+      return (seg.geometry as { radius: number }).radius;
+    };
+    check(
+      'a scaled INSERT scales a pre-resolved ARC entity\'s radius too',
+      Math.abs(arcRadius(scaledArc) - arcRadius(plainArcEntity) * 3) < 1e-9,
+      `${arcRadius(scaledArc)} vs ${arcRadius(plainArcEntity)} x 3`,
+    );
+    check(
+      '…and its chord scales with it, so the arc stays geometrically consistent',
+      (() => {
+        const p = scaledArc.document.pieces[0]!;
+        const seg = p.segments.find((s) => s.geometry.kind === 'arc')!;
+        const a = p.points.find((x) => x.id === seg.from)!.position;
+        const b = p.points.find((x) => x.id === seg.to)!.position;
+        // A 180-degree ARC: chord is exactly the diameter.
+        return Math.abs(Math.hypot(b.x - a.x, b.y - a.y) - arcRadius(scaledArc) * 2) < 1e-6;
+      })(),
+      'ok',
+    );
+  }
+
+  const nonUniform = importDxfWithDiagnostics(splice(`41${eol}2.0${eol}42${eol}3.0${eol}`), {
+    flavour: 'aama',
+    assumeUnit: 'mm',
+  });
+  check(
+    'a non-uniform scale over arc geometry is refused, not faked',
+    nonUniform.issues.some(
+      (i) =>
+        i.code === 'insert-transform-unrepresentable' &&
+        i.severity === 'error' &&
+        i.message.includes('ellipses'),
+    ),
+    nonUniform.issues.find((i) => i.code === 'insert-transform-unrepresentable')?.message ?? 'missing',
+  );
+  check('…and the piece is dropped rather than imported with a wrong radius', nonUniform.document.pieces.length === 0, `${nonUniform.document.pieces.length}`);
+
+  const mirroredArc = importDxfWithDiagnostics(splice(`41${eol}-1.0${eol}42${eol}1.0${eol}`), {
+    flavour: 'aama',
+    assumeUnit: 'mm',
+  });
+  {
+    // A mirror is uniform in magnitude, so the arc survives — but reflecting
+    // reverses the sweep, and an arc that keeps its old handedness through a
+    // mirror bows into the piece instead of out of it.
+    const seg = mirroredArc.document.pieces[0]!.segments.find((s) => s.geometry.kind === 'arc')!;
+    const plainSeg = plainArc.document.pieces[0]!.segments.find((s) => s.geometry.kind === 'arc')!;
+    check(
+      'mirroring reverses the arc sweep rather than leaving it bowing the wrong way',
+      seg.geometry.kind === 'arc' &&
+        plainSeg.geometry.kind === 'arc' &&
+        seg.geometry.clockwise === !plainSeg.geometry.clockwise,
+      `${JSON.stringify(seg.geometry)} vs plain ${JSON.stringify(plainSeg.geometry)}`,
+    );
+  }
 }
 
 /* --- 31. LWPOLYLINE reads into the same raw shape POLYLINE does ------------
