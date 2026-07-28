@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRestorePoint } from '@/db/persistence';
 import { markerStatus, utilization } from '@/marker/selectors';
-import type { NestInput } from '@/nest/heuristic';
-import { NestCancelled, runNest } from '@/nest/nestRunner';
+import { NestCancelled, runNestWorker } from '@/nest/nestRunner';
+import { requestFromMarker, toStorePlacements, type NestEngine } from '@/nest/pipeline';
 import { useMarkerStore } from '@/store/markerStore';
 import { useUiStore, type NestEffortSetting } from '@/store/uiStore';
 
@@ -17,6 +17,13 @@ import { useUiStore, type NestEffortSetting } from '@/store/uiStore';
 const EFFORT_VALUES: readonly NestEffortSetting[] = [1, 2, 3, 4, 5];
 const toEffort = (value: number): NestEffortSetting | undefined =>
   EFFORT_VALUES.find((candidate) => candidate === value);
+
+/**
+ * Bottom-left fill, which is what this button has always run. The shelf
+ * baseline is reachable through the same pipeline; exposing the choice is a
+ * product decision, not a plumbing one, so it stays a constant until asked for.
+ */
+const ENGINE: NestEngine = 'heuristic';
 
 const EFFORT_NOTES: Record<NestEffortSetting, string> = {
   1: 'Fastest. 1 cm grid, 8 angles for free pieces.',
@@ -87,37 +94,30 @@ export const AutoNestButton = () => {
       );
     }
 
-    // One entry per outstanding unit, so a quantity of four nests four times.
-    const queue = queueSource.flatMap((piece) =>
-      Array.from({ length: piece.quantity - piece.placed }, () => piece),
+    // The pipeline expands quantities, so the count here is only for the
+    // message the user reads.
+    const outstanding = queueSource.reduce(
+      (total, piece) => total + (piece.quantity - piece.placed),
+      0,
     );
-
-    const input: NestInput = {
-      pieces: queue,
-      fabricWidth: marker.fabricWidth,
-      placed: marker.pieces,
-      defectZones: marker.defectZones,
-      spliceLines: marker.spliceLines,
-      effort: ui.nestEffort,
-      cutterBuffer: marker.cutterBuffer,
-    };
+    const request = requestFromMarker(marker, ui.nestEffort);
 
     setPercent(0);
-    ui.setStatus('info', `Nesting ${queue.length} piece(s) at effort ${ui.nestEffort}…`);
+    ui.setStatus('info', `Nesting ${outstanding} piece(s) at effort ${ui.nestEffort}…`);
 
-    const run = runNest({ input, onProgress: setPercent });
+    const run = runNestWorker({ request, engine: ENGINE, onProgress: setPercent });
     cancelRef.current = run.cancel;
 
     try {
-      const result = await run.result;
-      useMarkerStore.getState().applyPlacements(result.placements);
+      const plan = await run.result;
+      useMarkerStore.getState().applyPlacements(toStorePlacements(plan));
 
       const after = useMarkerStore.getState().document;
-      const detail = result.unplaced.length > 0 ? `, ${result.unplaced.length} would not fit` : '';
+      const detail = plan.unplaced.length > 0 ? `, ${plan.unplaced.length} would not fit` : '';
       ui.setStatus(
-        result.unplaced.length > 0 ? 'warn' : 'ok',
-        `Nested ${result.placements.length} piece(s)${detail} — ${
-          after ? utilization(after).toFixed(1) : result.utilization.toFixed(1)
+        plan.unplaced.length > 0 ? 'warn' : 'ok',
+        `Nested ${plan.placements.length} piece(s)${detail} — ${
+          after ? utilization(after).toFixed(1) : '0.0'
         }% utilisation, ${after ? markerStatus(after) : ''}`,
       );
     } catch (error) {

@@ -1,5 +1,6 @@
-import type { NestInput, NestResult } from './heuristic';
+import type { NestPlan, NestRequest } from './model';
 import type { NestWorkerRequest, NestWorkerResponse } from './nestProtocol';
+import type { NestEngine } from './pipeline';
 
 /**
  * Main-thread orchestration for auto-nest.
@@ -7,10 +8,14 @@ import type { NestWorkerRequest, NestWorkerResponse } from './nestProtocol';
  * Same shape as the DXF importer: a worker per run, terminated on settle.
  * Nesting is a deliberate, occasional action, so startup cost is irrelevant
  * next to holding a worker and its obstacle set alive between runs.
+ *
+ * Named `runNestWorker`, not `runNest`: `pipeline.runNest` is the one that
+ * actually nests. This only moves the work off the main thread.
  */
 
 export interface NestRunOptions {
-  readonly input: NestInput;
+  readonly request: NestRequest;
+  readonly engine: NestEngine;
   readonly onProgress?: (percent: number) => void;
   readonly timeoutMs?: number;
 }
@@ -26,12 +31,12 @@ export class NestCancelled extends Error {
 }
 
 export interface NestRun {
-  readonly result: Promise<NestResult>;
+  readonly result: Promise<NestPlan>;
   /** Stop a run that is taking longer than the user is willing to wait. */
   readonly cancel: () => void;
 }
 
-export const runNest = (options: NestRunOptions): NestRun => {
+export const runNestWorker = (options: NestRunOptions): NestRun => {
   const worker = new Worker(new URL('./workers/nestWorker.ts', import.meta.url), {
     type: 'module',
   });
@@ -40,7 +45,7 @@ export const runNest = (options: NestRunOptions): NestRun => {
   let finish: (action: () => void) => void = () => undefined;
   let rejectRun: (error: Error) => void = () => undefined;
 
-  const result = new Promise<NestResult>((resolve, reject) => {
+  const result = new Promise<NestPlan>((resolve, reject) => {
     rejectRun = reject;
     finish = (action: () => void) => {
       if (settled) return;
@@ -61,7 +66,7 @@ export const runNest = (options: NestRunOptions): NestRun => {
         return;
       }
       if (message.type === 'RESULT') {
-        finish(() => resolve(message.result));
+        finish(() => resolve(message.plan));
         return;
       }
       finish(() => reject(new Error(message.message)));
@@ -71,8 +76,12 @@ export const runNest = (options: NestRunOptions): NestRun => {
       finish(() => reject(new Error(event.message || 'Nest worker failed to start')));
     };
 
-    const request: NestWorkerRequest = { type: 'NEST', input: options.input };
-    worker.postMessage(request);
+    const message: NestWorkerRequest = {
+      type: 'NEST',
+      request: options.request,
+      engine: options.engine,
+    };
+    worker.postMessage(message);
   });
 
   return {

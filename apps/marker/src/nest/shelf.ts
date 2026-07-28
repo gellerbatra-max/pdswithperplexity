@@ -33,6 +33,7 @@ import {
   type NestPiece,
   type NestPlacement,
   type NestPlan,
+  type NestProgress,
   type NestRequest,
 } from './model';
 
@@ -133,7 +134,7 @@ interface Shelf {
   depth: number;
 }
 
-export const nestShelf = (request: NestRequest): NestPlan => {
+export const nestShelf = (request: NestRequest, onProgress?: NestProgress): NestPlan => {
   const { sheet, spacing, effort } = request;
   const buffer = spacing.betweenPieces;
   const margin = spacing.fromEdge;
@@ -176,7 +177,7 @@ export const nestShelf = (request: NestRequest): NestPlan => {
     return [...starts].sort((a, b) => a - b);
   };
 
-  for (const piece of queue) {
+  for (const [index, piece] of queue.entries()) {
     const candidates = preferredOrder(candidatesFor(piece, anglesFor(piece.rotation, effort)));
     let landed = false;
 
@@ -233,6 +234,8 @@ export const nestShelf = (request: NestRequest): NestPlan => {
     }
 
     if (!landed) unplaced.push(piece.id);
+    // Once per piece, which is the only boundary this algorithm has.
+    onProgress?.(Math.round(((index + 1) / queue.length) * 100));
   }
 
   return { placements, unplaced, length: markerLength, sheet };

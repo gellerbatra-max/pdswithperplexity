@@ -164,6 +164,16 @@ export interface NestPlan {
   readonly sheet: NestSheet;
 }
 
+/**
+ * Progress, reported once per piece.
+ *
+ * Both engines place one piece at a time and have no finer boundary, so
+ * anything more granular would be invented rather than measured.
+ */
+export interface NestProgress {
+  (percent: number): void;
+}
+
 export const EMPTY_PLAN = (sheet: NestSheet): NestPlan => ({
   placements: [],
   unplaced: [],
