@@ -24,6 +24,7 @@ import type {
   TrayPiece,
 } from '@/marker/schema';
 import { anglesFor, polygonArea, rotationPolicyFor, type NestEffort } from './model';
+import { cellSizeFor, SpatialIndex } from './spatialIndex';
 
 export type { NestEffort };
 
@@ -92,6 +93,16 @@ interface Candidate {
   readonly rotation: number;
   readonly parts: Point[][];
   readonly bounds: Bounds;
+  /**
+   * Somewhere to put `parts` shifted to the position being tried.
+   *
+   * The search asks about millions of positions, and building a fresh polygon
+   * for each one was the single largest cost in the run — far more than the
+   * SAT test it fed. The same buffer is refilled instead. Safe because
+   * `collides` runs to completion before the next position is considered, and
+   * nothing keeps a reference to the points afterwards.
+   */
+  readonly scratch: Point[][];
 }
 
 const candidatesFor = (piece: TrayPiece, rotations: readonly number[]): Candidate[] => {
@@ -101,14 +112,33 @@ const candidatesFor = (piece: TrayPiece, rotations: readonly number[]): Candidat
   for (const rotation of rotations) {
     const spin = { rotation, flipped: false };
     const oriented = orientPoints(piece.geometry, spin);
+    const turned = parts.map((part) => orientPoints(part, spin));
     candidates.push({
       rotation,
-      parts: parts.map((part) => orientPoints(part, spin)),
+      parts: turned,
       bounds: boundsOf(oriented),
+      scratch: turned.map((part) => part.map(() => ({ x: 0, y: 0 }))),
     });
   }
 
   return candidates;
+};
+
+/** Refill a candidate's scratch buffer with its outline at `at`. */
+const shiftInto = (candidate: Candidate, at: Point): Point[][] => {
+  for (let i = 0; i < candidate.parts.length; i += 1) {
+    const source = candidate.parts[i];
+    const target = candidate.scratch[i];
+    if (!source || !target) continue;
+    for (let j = 0; j < source.length; j += 1) {
+      const point = source[j];
+      const slot = target[j];
+      if (!point || !slot) continue;
+      slot.x = point.x + at.x;
+      slot.y = point.y + at.y;
+    }
+  }
+  return candidate.scratch;
 };
 
 const fitsFabric = (bounds: Bounds, at: Point, fabricWidth: number): boolean =>
@@ -120,11 +150,20 @@ const straddlesSplice = (bounds: Bounds, at: Point, splices: readonly SpliceLine
   return splices.some((splice) => left < splice.x && right > splice.x);
 };
 
+/**
+ * Does this candidate at this position hit anything already down?
+ *
+ * Three filters, cheapest first: the grid narrows to obstacles sharing a cell,
+ * the AABB test drops the rest of the near misses, and SAT decides the ones
+ * that are actually close. The grid changes only which pairs reach the AABB
+ * test — every obstacle that overlaps `searchBounds` is still visited — so the
+ * answer is the same one a full scan gives.
+ */
 const collides = (
   candidate: Candidate,
   at: Point,
   buffer: number,
-  obstacles: readonly Obstacle[],
+  obstacles: SpatialIndex<Obstacle>,
 ): boolean => {
   const searchBounds = expand(
     {
@@ -136,22 +175,29 @@ const collides = (
     buffer,
   );
 
-  for (const obstacle of obstacles) {
-    // Broad phase first: most obstacles are nowhere near, and SAT is the
+  /**
+   * Filled at most once per position, and only if something is near enough to
+   * need it — a position with nothing around it never builds an outline.
+   */
+  let moved: Point[][] | null = null;
+
+  return obstacles.forEachNear(searchBounds, (obstacle) => {
+    // Broad phase: sharing a cell is not overlapping, and SAT is the
     // expensive half.
-    if (!overlaps(searchBounds, obstacle.bounds)) continue;
-    for (const part of candidate.parts) {
-      const moved = translate(part, at);
+    if (!overlaps(searchBounds, obstacle.bounds)) return false;
+
+    const parts = moved ?? (moved = shiftInto(candidate, at));
+    for (const part of parts) {
       for (const obstaclePart of obstacle.parts) {
-        if (satCollision(moved, obstaclePart).collides) return true;
+        if (satCollision(part, obstaclePart).collides) return true;
         // Expanding the search bounds only decides which pairs get tested; the
         // gap itself has to be measured, or pieces come to rest touching and
         // the cutter has nothing to follow.
-        if (buffer > 0 && separation(moved, obstaclePart) < buffer) return true;
+        if (buffer > 0 && separation(part, obstaclePart) < buffer) return true;
       }
     }
-  }
-  return false;
+    return false;
+  });
 };
 
 export interface NestProgress {
@@ -163,16 +209,27 @@ export const nest = (input: NestInput, onProgress?: NestProgress): NestResult =>
   const buffer = input.cutterBuffer ?? 0;
   const step = 1 / effort;
 
-  const obstacles: Obstacle[] = [];
+  const initial: Obstacle[] = [];
   for (const piece of input.placed) {
     const parts = convexPartsOf(piece.geometry).map((part) =>
       translate(orientPoints(part, piece), piece.position),
     );
-    obstacles.push(toObstacle(parts));
+    initial.push(toObstacle(parts));
   }
   for (const zone of input.defectZones) {
-    obstacles.push(toObstacle([rectangle(zone.x, zone.y, zone.width, zone.height)]));
+    initial.push(toObstacle([rectangle(zone.x, zone.y, zone.width, zone.height)]));
   }
+
+  // Sized from the pieces this run will handle, not from what is already down:
+  // an empty marker has no obstacles to measure, and the pieces about to be
+  // placed are what the grid will end up holding.
+  const obstacles = new SpatialIndex<Obstacle>(
+    cellSizeFor(
+      [...input.pieces.map((piece) => boundsOf(piece.geometry)), ...initial.map((o) => o.bounds)],
+      fabricWidth,
+    ),
+  );
+  for (const obstacle of initial) obstacles.insert(obstacle.bounds, obstacle);
 
   // Largest bounding-box area first: big pieces have the fewest legal homes,
   // so placing them into an empty marker wastes the least fabric.
@@ -201,12 +258,10 @@ export const nest = (input: NestInput, onProgress?: NestProgress): NestResult =>
     // Scan x outermost so the marker grows only when the current column is
     // genuinely full — this is what makes it bottom-LEFT fill.
     //
-    // TODO(performance): broad-phase spatial grid. This is
-    // O(positions x obstacles), positions scale with effort squared, and every
-    // obstacle is retested at every candidate position however far away it is.
-    // Bucketing obstacles into fabric-width cells and testing only the buckets
-    // a candidate touches would make the cost independent of marker length,
-    // which is what a 200-piece order at effort 5 needs.
+    // The obstacle set is behind a spatial grid, so a candidate is only tested
+    // against what shares a cell with it rather than against everything placed
+    // so far. Positions still scale with effort squared; what no longer scales
+    // is the cost of each one.
     const maxX = markerLength + Math.max(...candidates.map((c) => c.bounds.maxX - c.bounds.minX)) +
       SCAN_MARGIN;
 
@@ -224,9 +279,8 @@ export const nest = (input: NestInput, onProgress?: NestProgress): NestResult =>
             rotation: candidate.rotation,
             flipped: false,
           });
-          obstacles.push(
-            toObstacle(candidate.parts.map((part) => translate(part, at))),
-          );
+          const placedObstacle = toObstacle(candidate.parts.map((part) => translate(part, at)));
+          obstacles.insert(placedObstacle.bounds, placedObstacle);
           markerLength = Math.max(markerLength, at.x + candidate.bounds.maxX);
           placedArea += polygonArea(piece.geometry);
           landed = true;

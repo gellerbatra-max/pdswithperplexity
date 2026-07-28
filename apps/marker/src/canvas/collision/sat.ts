@@ -23,37 +23,32 @@ export interface CollisionResult {
 
 const NO_COLLISION: CollisionResult = { collides: false };
 
-/** One normalised outward normal per edge — the candidate separating axes. */
-const axesOf = (polygon: readonly Point[]): Point[] => {
-  const axes: Point[] = [];
-  for (let i = 0; i < polygon.length; i += 1) {
-    const from = polygon[i];
-    const to = polygon[(i + 1) % polygon.length];
-    if (!from || !to) continue;
-    const edgeX = to.x - from.x;
-    const edgeY = to.y - from.y;
-    const length = Math.hypot(edgeX, edgeY);
-    // Duplicate vertices produce a zero-length edge with no meaningful normal.
-    if (length === 0) continue;
-    axes.push({ x: -edgeY / length, y: edgeX / length });
-  }
-  return axes;
-};
+/*
+ * The axis loop below is written out rather than built from helper arrays.
+ *
+ * It used to call `axesOf(a)` and `axesOf(b)`, spread both into a third array,
+ * and allocate a `{min, max}` per projection — around twenty-five objects per
+ * call. Auto-nest makes millions of these calls in a single run, and the
+ * garbage that produced cost more than the arithmetic did.
+ *
+ * The arithmetic itself is unchanged: same normals, same order (a's edges then
+ * b's), same comparisons, so the numbers out are the numbers that came out
+ * before.
+ */
 
-interface Projection {
-  min: number;
-  max: number;
-}
-
-const project = (polygon: readonly Point[], axis: Point): Projection => {
+/** Project a polygon onto an axis, into the caller's scalars. */
+let projectedMin = 0;
+let projectedMax = 0;
+const projectOnto = (polygon: readonly Point[], axisX: number, axisY: number): void => {
   let min = Number.POSITIVE_INFINITY;
   let max = Number.NEGATIVE_INFINITY;
   for (const point of polygon) {
-    const value = point.x * axis.x + point.y * axis.y;
+    const value = point.x * axisX + point.y * axisY;
     min = Math.min(min, value);
     max = Math.max(max, value);
   }
-  return { min, max };
+  projectedMin = min;
+  projectedMax = max;
 };
 
 const centroidOf = (polygon: readonly Point[]): Point => {
@@ -84,39 +79,57 @@ export const satCollision = (
   if (a.length < 3 || b.length < 3) return NO_COLLISION;
 
   let smallestOverlap = Number.POSITIVE_INFINITY;
-  let smallestAxis: Point | null = null;
+  let smallestAxisX = 0;
+  let smallestAxisY = 0;
+  let haveAxis = false;
 
-  for (const axis of [...axesOf(a), ...axesOf(b)]) {
-    const projectionA = project(a, axis);
-    const projectionB = project(b, axis);
-    const overlap =
-      Math.min(projectionA.max, projectionB.max) -
-      Math.max(projectionA.min, projectionB.min) +
-      minGap;
+  for (let side = 0; side < 2; side += 1) {
+    const edges = side === 0 ? a : b;
+    for (let i = 0; i < edges.length; i += 1) {
+      const from = edges[i];
+      const to = edges[(i + 1) % edges.length];
+      if (!from || !to) continue;
+      const edgeX = to.x - from.x;
+      const edgeY = to.y - from.y;
+      const length = Math.hypot(edgeX, edgeY);
+      // Duplicate vertices produce a zero-length edge with no meaningful normal.
+      if (length === 0) continue;
+      const axisX = -edgeY / length;
+      const axisY = edgeX / length;
 
-    // A gap on any axis proves separation — stop immediately. Touching exactly
-    // (overlap 0) is not a collision; pieces laid edge to edge are normal.
-    if (overlap <= 0) return NO_COLLISION;
+      projectOnto(a, axisX, axisY);
+      const minA = projectedMin;
+      const maxA = projectedMax;
+      projectOnto(b, axisX, axisY);
+      const overlap = Math.min(maxA, projectedMax) - Math.max(minA, projectedMin) + minGap;
 
-    if (overlap < smallestOverlap) {
-      smallestOverlap = overlap;
-      smallestAxis = axis;
+      // A gap on any axis proves separation — stop immediately. Touching
+      // exactly (overlap 0) is not a collision; pieces laid edge to edge are
+      // normal.
+      if (overlap <= 0) return NO_COLLISION;
+
+      if (overlap < smallestOverlap) {
+        smallestOverlap = overlap;
+        smallestAxisX = axisX;
+        smallestAxisY = axisY;
+        haveAxis = true;
+      }
     }
   }
 
-  if (!smallestAxis) return NO_COLLISION;
+  if (!haveAxis) return NO_COLLISION;
 
   // Axis normals point either way; orient this one away from b so the caller
   // can apply the vector without reasoning about winding order.
   const centreA = centroidOf(a);
   const centreB = centroidOf(b);
   const towardA =
-    (centreA.x - centreB.x) * smallestAxis.x + (centreA.y - centreB.y) * smallestAxis.y;
+    (centreA.x - centreB.x) * smallestAxisX + (centreA.y - centreB.y) * smallestAxisY;
   const sign = towardA < 0 ? -1 : 1;
 
   return {
     collides: true,
-    mtv: { x: smallestAxis.x * smallestOverlap * sign, y: smallestAxis.y * smallestOverlap * sign },
+    mtv: { x: smallestAxisX * smallestOverlap * sign, y: smallestAxisY * smallestOverlap * sign },
   };
 };
 
@@ -132,11 +145,26 @@ export const separation = (a: readonly Point[], b: readonly Point[]): number => 
   if (a.length < 3 || b.length < 3) return 0;
 
   let widestGap = 0;
-  for (const axis of [...axesOf(a), ...axesOf(b)]) {
-    const projectionA = project(a, axis);
-    const projectionB = project(b, axis);
-    const gap = Math.max(projectionA.min, projectionB.min) - Math.min(projectionA.max, projectionB.max);
-    if (gap > widestGap) widestGap = gap;
+  for (let side = 0; side < 2; side += 1) {
+    const edges = side === 0 ? a : b;
+    for (let i = 0; i < edges.length; i += 1) {
+      const from = edges[i];
+      const to = edges[(i + 1) % edges.length];
+      if (!from || !to) continue;
+      const edgeX = to.x - from.x;
+      const edgeY = to.y - from.y;
+      const length = Math.hypot(edgeX, edgeY);
+      if (length === 0) continue;
+      const axisX = -edgeY / length;
+      const axisY = edgeX / length;
+
+      projectOnto(a, axisX, axisY);
+      const minA = projectedMin;
+      const maxA = projectedMax;
+      projectOnto(b, axisX, axisY);
+      const gap = Math.max(minA, projectedMin) - Math.min(maxA, projectedMax);
+      if (gap > widestGap) widestGap = gap;
+    }
   }
   return widestGap;
 };

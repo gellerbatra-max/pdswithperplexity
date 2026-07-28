@@ -1336,15 +1336,44 @@ Everything is local and deterministic: same request and mode in, same plan out.
 of `runNest` so plans stay comparable — a plan carrying its own timing would
 never equal itself.
 
-### Outstanding — bottom-left fill scaling
+### Bottom-left fill scaling
 
-`TODO(performance)` in `nest/heuristic.ts`. The scan is
-O(positions × obstacles), positions scale with effort squared, and every
-obstacle is retested at every candidate position however far away it is.
-Bucketing obstacles into fabric-width cells and testing only the buckets a
-candidate touches would make the cost independent of marker length, which is
-what a 200-piece order at effort 5 needs. Shelf does not have this problem;
-it never scans.
+`nest/spatialIndex.ts` is a uniform grid over obstacle bounding boxes.
+`collides` asks it which obstacles share a cell with the candidate instead of
+walking all of them. It is a filter: the same AABB test and the same SAT pass
+run on whatever comes back, so the result is identical to a full scan.
+
+**The old TODO here blamed the wrong thing.** It said the cost was
+O(positions × obstacles) and that bucketing would make it independent of
+marker length. Measured, the grid alone bought 20% and the curve did not
+change: obstacle count was never the bottleneck, because the AABB broad phase
+was already rejecting distant obstacles for four numeric comparisons each.
+
+Profiling a 40-piece order found 6.2M `satCollision` calls and 6.2M polygon
+allocations feeding them. `satCollision` was building two axis arrays, a
+spread of both, and a `{min, max}` per projection — about twenty-five objects
+per call. That garbage, not the search, was the cost. It is now written as a
+flat loop over scalars, with the same normals in the same order, so the
+numbers are unchanged.
+
+Measured on the same machine, same fixtures:
+
+| Pieces | Before | After | |
+|---|---|---|---|
+| 20 | 740 ms | 562 ms | 1.32× |
+| 40 | 3329 ms | 2419 ms | 1.38× |
+| 80 | 15163 ms | 10198 ms | 1.49× |
+| 160 | 81618 ms | 40484 ms | 2.02× |
+
+The gain grows with size, but the curve is still roughly 4–5× per doubling.
+**What remains is the position count, not the cost per position**: the scan
+restarts at x = 0 for every piece and steps at `1 / effort` cm, so a 160-piece
+order tests tens of millions of positions. Cutting that means starting the
+scan later or skipping blocked spans — both change which position BLF finds
+first, and therefore what BLF means. Not a speed-up; a different engine.
+
+`heuristicGolden.test.ts` pins the placements captured before this work.
+Shelf never scans and has none of this.
 
 ---
 
