@@ -191,10 +191,68 @@ select {
   background: var(--surface-panel);
 }
 
+.tray__search {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tray__search-input {
+  width: 100%;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font-size: var(--text-xs);
+}
+
+.tray__search-input:focus-visible {
+  outline: 1px solid var(--accent);
+  border-color: var(--accent);
+}
+
 .tray__list {
   flex: 1;
   overflow-y: auto;
   padding: var(--space-2);
+}
+
+.tray__bundle + .tray__bundle {
+  margin-top: var(--space-3);
+}
+
+/* A finished bundle is a record, not work — it recedes but stays readable. */
+.tray__bundle[data-complete] {
+  opacity: 0.55;
+}
+
+.tray__bundle-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+}
+
+.tray__swatch {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: var(--radius-pill);
+}
+
+.tray__bundle-name {
+  flex: 1;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.tray__bundle-count {
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
 }
 
 .tray__row {
@@ -218,7 +276,22 @@ select {
 
 .tray__row:disabled {
   cursor: default;
-  opacity: 0.55;
+  opacity: 0.5;
+}
+
+/* Placed rows are struck through as well as dimmed: opacity alone reads as
+   "loading" to anyone who has not been told otherwise. */
+.tray__row[data-exhausted] .tray__name {
+  text-decoration: line-through;
+  color: var(--text-faint);
+}
+
+.tray__row[draggable='true'] {
+  cursor: grab;
+}
+
+.tray__row[draggable='true']:active {
+  cursor: grabbing;
 }
 
 /*

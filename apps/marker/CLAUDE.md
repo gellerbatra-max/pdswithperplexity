@@ -968,6 +968,39 @@ nothing under `canvas/` may import a store.
 ✓ Verify: the cursor readout tracks the pointer and clears on leave.
 ✓ Verify: the zoom percentage tracks the camera.
 
+### Phase 1 Step 4 — Tray Redesign
+
+`PieceTray` gains a search bar, bundle sections with colour swatches,
+placed/total badges, and drag-to-canvas.
+
+**Two grouping levels, and they are not interchangeable.** `trayGroups`
+still groups by piece × size × fabric, but `trayBundles` runs it *per
+bundle* rather than across the whole tray. The flat view deliberately
+merges "Front" from B1 and B2 into one row; the bundle view must not, or
+a section would show work belonging to another bundle.
+
+Finished work sorts last at both levels — a completed row is a record,
+not a thing to do, and leaving it in place pushes the remaining work off
+the bottom of a long order. Completed rows are struck through as well as
+dimmed: opacity alone reads as "loading".
+
+Drag-to-canvas:
+- The row carries `application/x-nestiq-tray-piece`. The canvas checks
+  that **before** files, because a row carries no files and testing
+  files first would silently swallow the drop.
+- The drag image is a canvas of the piece's real outline — the browser's
+  default ghost tells you what you grabbed but nothing about the shape
+  you are placing, and shape is the question you are answering.
+- The drop point becomes the piece's **centre**, not its origin, and the
+  result goes through the same collision resolution a drag uses, so a
+  piece dropped onto a neighbour settles beside it.
+
+✓ Verify: swatches, bundle sections and badges render.
+✓ Verify: search filters instantly, including by bundle name.
+✓ Verify: a dragged row places where it is dropped, without overlapping.
+✓ Verify: completed rows are dimmed and sorted last.
+✓ Verify: dropping a DXF file still imports.
+
 ---
 
 ## Replying to Claude After Each Step

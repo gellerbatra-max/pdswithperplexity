@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MarkerCanvas } from '@/canvas/MarkerCanvas';
+import { boundsOf } from '@/canvas/collision/aabb';
+import { resolveDragPosition } from '@/canvas/tools/DragTool';
 import { commandForKey } from '@/commands/registry';
 import { importDxfFile } from '@/io/dxfImporter';
+import type { PlacedPiece } from '@/marker/schema';
 import { useMarkerStore } from '@/store/markerStore';
 import { useUiStore } from '@/store/uiStore';
 import { DEFAULT_ZOOM, useViewportStore } from '@/store/viewportStore';
+import { TRAY_DRAG_TYPE } from './PieceTray';
 
 /**
  * Hosts the imperative Konva canvas.
@@ -20,12 +24,70 @@ const RUL_EXTENSION = '.rul';
 
 export const MarkerStage = () => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dropActive, setDropActive] = useState(false);
+  /** What is hovering the stage, so the hint can say what will happen. */
+  const [dropActive, setDropActive] = useState<'file' | 'piece' | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
+
+  /**
+   * Place a tray piece where it was dropped.
+   *
+   * The drop point becomes the piece's centre rather than its origin — you aim
+   * at where the piece should sit, not at a corner you cannot see. The result
+   * goes through the same collision resolution a drag uses, so a piece dropped
+   * onto a neighbour settles beside it instead of landing in violation.
+   */
+  const dropTrayPiece = useCallback((trayPieceId: string, clientX: number, clientY: number) => {
+    const container = containerRef.current;
+    const marker = useMarkerStore.getState().document;
+    if (!container || !marker) return;
+
+    const tray = marker.trayPieces.find((piece) => piece.id === trayPieceId);
+    if (!tray) return;
+
+    const rect = container.getBoundingClientRect();
+    const { zoom, panX, panY } = useViewportStore.getState();
+    const at = {
+      x: (clientX - rect.left - panX) / zoom,
+      y: marker.fabricWidth - (clientY - rect.top - panY) / zoom,
+    };
+
+    const bounds = boundsOf(tray.geometry);
+    const centred = {
+      x: at.x - (bounds.minX + bounds.maxX) / 2,
+      y: at.y - (bounds.minY + bounds.maxY) / 2,
+    };
+
+    const provisional: PlacedPiece = {
+      id: `provisional-${tray.id}`,
+      pieceDefId: tray.id,
+      name: tray.name,
+      size: tray.size,
+      bundle: tray.bundle,
+      fabricCode: tray.fabricCode,
+      geometry: tray.geometry,
+      position: centred,
+      rotation: 0,
+      flipped: false,
+      placed: true,
+      blocked: false,
+    };
+
+    const resolved = resolveDragPosition(marker, provisional, centred);
+    useMarkerStore.getState().placeFromTray(tray.id, resolved);
+    useUiStore.getState().setStatus('ok', `Placed ${tray.name} ${tray.size}`);
+  }, []);
 
   const onDrop = useCallback(async (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
-    setDropActive(false);
+    setDropActive(null);
+
+    // A tray row before a file: the row carries no files, and checking files
+    // first would silently swallow the drop.
+    const trayPieceId = event.dataTransfer.getData(TRAY_DRAG_TYPE);
+    if (trayPieceId !== '') {
+      dropTrayPiece(trayPieceId, event.clientX, event.clientY);
+      return;
+    }
 
     const files = [...event.dataTransfer.files];
     const dxf = files.find((file) => file.name.toLowerCase().endsWith(DXF_EXTENSION));
@@ -170,14 +232,20 @@ export const MarkerStage = () => {
       data-drop-active={dropActive || undefined}
       onDragOver={(event) => {
         event.preventDefault();
-        setDropActive(true);
+        // dataTransfer values are unreadable during dragover, but the type
+        // list is not — enough to say what will happen on release.
+        setDropActive(event.dataTransfer.types.includes(TRAY_DRAG_TYPE) ? 'piece' : 'file');
       }}
-      onDragLeave={() => setDropActive(false)}
+      onDragLeave={() => setDropActive(null)}
       onDrop={onDrop}
     >
       {/* The canvas host is separate so Konva owns an element React never re-renders. */}
       <div className="marker-stage__canvas" ref={containerRef} />
-      {dropActive ? <div className="marker-stage__hint">Drop a DXF to import</div> : null}
+      {dropActive ? (
+        <div className="marker-stage__hint">
+          {dropActive === 'piece' ? 'Drop to place the piece here' : 'Drop a DXF to import'}
+        </div>
+      ) : null}
       {progress === null ? null : (
         <div className="marker-stage__progress" role="progressbar" aria-valuenow={progress}>
           <span style={{ width: `${progress}%` }} />
