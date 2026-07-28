@@ -14,6 +14,7 @@ io/
     ├── index.ts        Adapters for both flavours
     ├── types.ts        Flavour, options, entity kinds, ConversionIssue
     ├── tokenizer.ts     ASCII group-code tokeniser (code/value pairs)
+    ├── reader.ts        Format layer: token stream → raw entity records, no semantics
     ├── layerMapping.ts  Pattern concept ↔ DXF layer number, + fixture evidence
     ├── curves.ts        bulge / ARC / SPLINE → SegmentGeometry (spec-driven)
     ├── ruleTable.ts     Companion .RUL grade rule table → SizeRange/GradeRule
@@ -30,6 +31,8 @@ io/
 | Native JSON round-trip | Implemented |
 | DXF layer mapping table | Written, **numbers unverified against ASTM D6673**; 6 bindings confirmed against real files, 4 **actively contradicted**, 2 untested. `npm run report:dxf` prints the current state |
 | DXF export validation | Implemented and useful today |
+| LWPOLYLINE | **Real** — read in the reader layer into the same `RawPolyline` record POLYLINE feeds (inline 10/20/42 vertex groups, closed flag, bulge on any vertex including the closing one), so chaining, cleaning and curve resolution are shared, not duplicated. Still synthetic-tested only: no vendor export on hand uses it |
+| DXF reader/importer split | `reader.ts` knows the container format and entity group codes, nothing else — no layers, no units, no flips. `import.ts` owns every interpretation. Reader bugs are desyncs; interpretation bugs are wrong meaning; the split keeps a fix in one from quietly changing the other |
 | DXF import (tokenizer, BLOCK/INSERT resolution, topology rebuild) | **Real**, scoped to what three real fixtures prove: boundary polylines including outlines split into head-to-tail chains, units from `$INSUNITS` / `Units:` (METRIC, IMPERIAL, ENGLISH), self-labelled `Key:Value` metadata, LINE kept as unclaimed construction geometry, and POINT entities read as notches and turn/curve markers |
 | Companion `.RUL` grade rule table | **Real** — parsed into `SizeRange` + `GradeRule[]`, attached to points via the DXF's `# N` marks. Optional: absent, the geometry imports identically |
 | DXF curve entities | **Real, but spec-driven rather than evidence-driven** — bulge and `ARC` reconstruct exactly, a degree-3 four-point `SPLINE` becomes an exact cubic, any other `SPLINE` is chorded to `FLATTEN_TOLERANCE_MM` and reported as approximated. Fixtures are synthetic; see below |
@@ -71,6 +74,31 @@ doesn't recognise gets a warning naming it (or an error, under
 `options.strict`) and is skipped, never silently dropped or reinterpreted.
 Export is untouched and still throws `FormatNotImplementedError` — nothing
 here may return invented geometry, in either direction.
+
+LWPOLYLINE malformations are reported precisely rather than absorbed: vertex
+fields arriving before any `10` opened a vertex are dropped and counted
+(`lwpolyline-orphaned-fields` — inventing a vertex for them would be
+fabricating geometry), a declared count (`90`) that disagrees with the data is
+named (`lwpolyline-vertex-count-mismatch`), and an empty one is skipped
+(`lwpolyline-empty`) so it cannot break the boundary chain behind it.
+
+Three safety rules round out the reader (all synthetic-tested, § 30, since no
+real file on hand misbehaves in these ways):
+
+- **A boundary the file never closed is reported when the importer closes
+  it.** Closure needs a source — a repeated end vertex (5109S, the AccuMark
+  chains) or the polyline's closed flag (the TSHIRT writer sets the flag and
+  does not repeat the vertex; group 70 is now read). A ring with neither
+  still imports closed, because the model has no open pieces, but the closing
+  edge is then the importer's invention and `boundary-closed-by-importer`
+  says so, with the edge's length.
+- **An INSERT carrying scale or rotation refuses the import** (error, was a
+  warning). A piece placed unscaled when its INSERT says ×2 is not a degraded
+  import, it is a different garment that looks plausible on screen. No vendor
+  export on hand carries a transform, so nothing real is turned away.
+- **Self-contradicting metadata is called ambiguous.** A field stated twice
+  with different values gets `metadata-field-conflict` naming both; an exact
+  repeat stays silent. First statement still wins, as before.
 
 ### Curves: the one capability not built from a real file
 
@@ -213,7 +241,8 @@ Two commands exercise the importer from the terminal:
 npm run check:dxf --workspace=apps/pds
 ```
 
-167 assertions across all three real fixtures. Expected values are
+177 assertions across the three real fixtures (plus synthetic probes for the
+safety rules no real file triggers). Expected values are
 transcribed by hand from each fixture's raw group codes and re-derived
 independently of `import.ts`, so a bug shared between the importer and its
 test still fails.

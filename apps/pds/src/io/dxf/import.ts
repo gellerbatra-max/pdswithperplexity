@@ -16,6 +16,16 @@ import {
   type SizeRange,
 } from '@/pattern';
 import { arcEntityToSegment, bulgeToArc, splineToSegments } from './curves';
+import {
+  parseSections,
+  TokenCursor,
+  type ParsedFile,
+  type RawBlock,
+  type RawInsert,
+  type RawPolyline,
+  type RawText,
+  type RawVertex,
+} from './reader';
 import { parseRuleTable } from './ruleTable';
 import { FormatParseError } from '../errors';
 import {
@@ -113,96 +123,6 @@ const INSUNITS_TO_MM: Record<number, number> = {
   4: 1, // millimetres
   5: 10, // centimetres
   6: 1000, // metres
-};
-
-/* --- Token cursor --------------------------------------------------------- */
-
-/**
- * A read position over the token stream. Every section/entity reader below
- * takes one of these and advances it; nothing here re-parses from an index
- * threaded through function arguments, which is how a walker like this one
- * quietly desyncs.
- */
-class TokenCursor {
-  private readonly tokens: readonly DxfToken[];
-  private index = 0;
-
-  constructor(tokens: readonly DxfToken[]) {
-    this.tokens = tokens;
-  }
-
-  peek(): DxfToken | undefined {
-    return this.tokens[this.index];
-  }
-
-  next(): DxfToken {
-    const token = this.tokens[this.index];
-    if (!token) throw new Error('unexpected end of file');
-    this.index += 1;
-    return token;
-  }
-
-  done(): boolean {
-    return this.index >= this.tokens.length;
-  }
-
-  /** True when the next token is the `0`-coded marker for `value`. */
-  at(value: string): boolean {
-    const token = this.peek();
-    return token !== undefined && token.code === 0 && token.value === value;
-  }
-}
-
-/**
- * Consumes one unknown entity — its `0 <TYPE>` marker and everything up to
- * (not including) the next `0`-coded token — and returns its type name.
- *
- * This is what lets the walker survive an entity kind it has no reader for:
- * every DXF entity, known or not, is delimited the same way, so "skip it" is
- * mechanical and never desyncs the cursor for whatever comes next.
- */
-const skipFields = (cursor: TokenCursor): void => {
-  while (!cursor.done() && cursor.peek()!.code !== 0) cursor.next();
-};
-
-const skipEntity = (cursor: TokenCursor): string => {
-  const marker = cursor.next();
-  skipFields(cursor);
-  // Only a `0`-coded token names an entity. Being handed anything else means
-  // a reader above left the cursor mid-entity, and reporting that token's
-  // value as an "entity" turns a walker desync into a confusing complaint
-  // about an entity kind that does not exist. Name it for what it is.
-  if (marker.code !== 0) return `(stray group ${marker.code} at line ${marker.line})`;
-  return marker.value;
-};
-
-/** Consumes tokens up to (not including) the section's `0 ENDSEC`. */
-const skipSection = (cursor: TokenCursor): void => {
-  while (!cursor.done() && !cursor.at('ENDSEC')) cursor.next();
-};
-
-/* --- HEADER --------------------------------------------------------------- */
-
-/**
- * `9 $NAME` marks a header variable; every following token up to the next
- * `9` or the section end is that variable's value. Most apparel-relevant
- * variables (`$INSUNITS`) are one token; this does not assume that, so a
- * multi-value variable like `$EXTMIN` is captured correctly even though
- * nothing reads it yet.
- */
-const readHeader = (cursor: TokenCursor): Map<string, DxfToken[]> => {
-  const vars = new Map<string, DxfToken[]>();
-  let current: string | null = null;
-  while (!cursor.done() && !cursor.at('ENDSEC')) {
-    const token = cursor.next();
-    if (token.code === 9) {
-      current = token.value;
-      vars.set(current, []);
-    } else if (current) {
-      vars.get(current)!.push(token);
-    }
-  }
-  return vars;
 };
 
 /**
@@ -397,409 +317,6 @@ const reportLayerUsage = (
   }
 };
 
-/* --- BLOCKS ----------------------------------------------------------------
- *
- * A BLOCK is a named, reusable piece of geometry defined in its own local
- * space; ENTITIES places it with INSERT. That two-step indirection is DXF's
- * own structure, not an apparel convention — every block here becomes a
- * *candidate* piece, and only the ones actually inserted survive into the
- * document (§ "Resolve" below).
- */
-
-interface RawPolyline {
-  readonly layer: string;
-  readonly vertices: readonly RawVertex[];
-  /** Position within its block. Boundary chaining is file-order only. */
-  readonly order: number;
-}
-
-/**
- * One polyline vertex, and the shape of the segment *leaving* it.
- *
- * DXF puts a segment's curvature on its start vertex (group 42, the bulge), so
- * that is where it lives here too rather than being paired off into edges the
- * file never wrote. `geometry`, when set, is a curve already resolved from a
- * standalone entity (an ARC or SPLINE) and takes precedence over `bulge`.
- */
-interface RawVertex {
-  readonly position: Vec2;
-  /** `tan(theta/4)`; 0 is a straight segment, which is the overwhelming case. */
-  readonly bulge: number;
-  readonly geometry?: SegmentGeometry;
-}
-
-/** A two-point LINE. What it *means* depends on its layer — see `LayerReport`. */
-interface RawLine {
-  readonly layer: string;
-  readonly start: Vec2;
-  readonly end: Vec2;
-}
-
-/** A POINT marker. Its layer is the only thing that says what it marks. */
-interface RawPoint {
-  readonly layer: string;
-  readonly position: Vec2;
-}
-
-/** A TEXT entity's literal string (group 1) and where it sits. */
-interface RawText {
-  readonly layer: string;
-  readonly value: string;
-  readonly position: Vec2;
-}
-
-interface RawBlock {
-  readonly name: string;
-  readonly basePoint: Vec2;
-  readonly polylines: readonly RawPolyline[];
-  readonly lines: readonly RawLine[];
-  readonly texts: readonly RawText[];
-  readonly points: readonly RawPoint[];
-  readonly arcs: readonly RawArc[];
-  readonly splines: readonly RawSpline[];
-}
-
-const readVertex = (cursor: TokenCursor): RawVertex => {
-  let x = 0;
-  let y = 0;
-  let bulge = 0;
-  while (!cursor.done() && cursor.peek()!.code !== 0) {
-    const token = cursor.next();
-    if (token.code === 10) x = tokenNumber(token);
-    else if (token.code === 20) y = tokenNumber(token);
-    // Group 42 is the bulge *only* on a VERTEX. The same code means view
-    // height on a VPORT and width factor on a STYLE — a distinction worth
-    // keeping, since scanning a whole file for code 42 finds all three.
-    else if (token.code === 42) bulge = tokenNumber(token);
-    // 8 (layer), 30 (z), 70 (vertex flags) — not meaningful for a flat 2D outline.
-  }
-  return { position: { x, y }, bulge };
-};
-
-/** `10/20` is the start point, `11/21` the end. */
-const readLine = (cursor: TokenCursor): RawLine => {
-  let layer = '0';
-  let start: Vec2 = { x: 0, y: 0 };
-  let end: Vec2 = { x: 0, y: 0 };
-  while (!cursor.done() && cursor.peek()!.code !== 0) {
-    const token = cursor.next();
-    if (token.code === 8) layer = token.value;
-    else if (token.code === 10) start = { ...start, x: tokenNumber(token) };
-    else if (token.code === 20) start = { ...start, y: tokenNumber(token) };
-    else if (token.code === 11) end = { ...end, x: tokenNumber(token) };
-    else if (token.code === 21) end = { ...end, y: tokenNumber(token) };
-    // 30/31 (z) — flat 2D pattern geometry only.
-  }
-  return { layer, start, end };
-};
-
-/** Raw ARC entity fields. Converted to endpoint form by `curves.ts`. */
-interface RawArc {
-  readonly layer: string;
-  readonly order: number;
-  readonly centre: Vec2;
-  readonly radius: number;
-  readonly startAngle: number;
-  readonly endAngle: number;
-}
-
-/** Raw SPLINE entity fields, enough to evaluate the curve. */
-interface RawSpline {
-  readonly layer: string;
-  readonly order: number;
-  readonly degree: number;
-  readonly closed: boolean;
-  readonly controlPoints: readonly Vec2[];
-  readonly knots: readonly number[];
-  readonly weights: readonly number[];
-}
-
-const readArc = (cursor: TokenCursor, order: number): RawArc => {
-  let layer = '0';
-  let centre: Vec2 = { x: 0, y: 0 };
-  let radius = 0;
-  let startAngle = 0;
-  let endAngle = 0;
-  while (!cursor.done() && cursor.peek()!.code !== 0) {
-    const token = cursor.next();
-    if (token.code === 8) layer = token.value;
-    else if (token.code === 10) centre = { ...centre, x: tokenNumber(token) };
-    else if (token.code === 20) centre = { ...centre, y: tokenNumber(token) };
-    else if (token.code === 40) radius = tokenNumber(token);
-    else if (token.code === 50) startAngle = tokenNumber(token);
-    else if (token.code === 51) endAngle = tokenNumber(token);
-  }
-  return { layer, order, centre, radius, startAngle, endAngle };
-};
-
-/**
- * SPLINE's control points and knots interleave: group 10/20 repeat per control
- * point, 40 repeats per knot, 41 per weight. They are collected as three
- * independent runs, which is how the format writes them — pairing them up by
- * adjacency is how a reader ends up one knot out.
- */
-const readSpline = (cursor: TokenCursor, order: number): RawSpline => {
-  let layer = '0';
-  let degree = 3;
-  let flags = 0;
-  const xs: number[] = [];
-  const ys: number[] = [];
-  const knots: number[] = [];
-  const weights: number[] = [];
-  while (!cursor.done() && cursor.peek()!.code !== 0) {
-    const token = cursor.next();
-    if (token.code === 8) layer = token.value;
-    else if (token.code === 70) flags = tokenNumber(token);
-    else if (token.code === 71) degree = tokenNumber(token);
-    else if (token.code === 10) xs.push(tokenNumber(token));
-    else if (token.code === 20) ys.push(tokenNumber(token));
-    else if (token.code === 40) knots.push(tokenNumber(token));
-    else if (token.code === 41) weights.push(tokenNumber(token));
-    // 11/21 (fit points), 12/13 (tangents), 42/43/44 (tolerances) — the
-    // control points define the curve; fit points are what it was fitted to.
-  }
-  const controlPoints = xs.map((x, i) => ({ x, y: ys[i] ?? 0 }));
-  return { layer, order, degree, closed: (flags & 1) === 1, controlPoints, knots, weights };
-};
-
-/** `10/20` is the marker position. POINT has no other geometry. */
-const readPoint = (cursor: TokenCursor): RawPoint => {
-  let layer = '0';
-  let position: Vec2 = { x: 0, y: 0 };
-  while (!cursor.done() && cursor.peek()!.code !== 0) {
-    const token = cursor.next();
-    if (token.code === 8) layer = token.value;
-    else if (token.code === 10) position = { ...position, x: tokenNumber(token) };
-    else if (token.code === 20) position = { ...position, y: tokenNumber(token) };
-  }
-  return { layer, position };
-};
-
-/** Group `1` carries the literal string; `40` (height) and style are not used. */
-const readText = (cursor: TokenCursor): RawText => {
-  let layer = '0';
-  let value = '';
-  let position: Vec2 = { x: 0, y: 0 };
-  while (!cursor.done() && cursor.peek()!.code !== 0) {
-    const token = cursor.next();
-    if (token.code === 8) layer = token.value;
-    else if (token.code === 1) value = token.value;
-    else if (token.code === 10) position = { ...position, x: tokenNumber(token) };
-    else if (token.code === 20) position = { ...position, y: tokenNumber(token) };
-  }
-  return { layer, value, position };
-};
-
-const readPolyline = (cursor: TokenCursor, order: number): RawPolyline => {
-  let layer = '0';
-  while (!cursor.done() && cursor.peek()!.code !== 0) {
-    const token = cursor.next();
-    if (token.code === 8) layer = token.value;
-    // 66 (entities-follow) and 70 (closed flag) — closure is inferred from
-    // the vertex data itself (see `cleanRing`), not trusted from the flag:
-    // a writer that gets the flag wrong is a real, observed failure mode,
-    // and the vertex list cannot lie about whether it repeats its start.
-  }
-
-  const vertices: RawVertex[] = [];
-  while (!cursor.done() && !cursor.at('SEQEND')) {
-    if (cursor.at('VERTEX')) {
-      cursor.next();
-      vertices.push(readVertex(cursor));
-    } else {
-      // Some other entity nested where a VERTEX was expected — skip it
-      // rather than let it desync the polyline read.
-      skipEntity(cursor);
-    }
-  }
-  // SEQEND carries its own group codes (a layer, at least, in real files).
-  // Consuming only its `0 SEQEND` marker leaves those fields in the stream,
-  // where the caller's entity loop reads the first of them as if it were an
-  // entity marker — a desync that shows up as a complaint about an entity
-  // named "1". Skip the whole thing, marker and fields alike.
-  if (cursor.at('SEQEND')) {
-    cursor.next();
-    skipFields(cursor);
-  }
-
-  return { layer, vertices, order };
-};
-
-const readBlock = (cursor: TokenCursor, issues: ConversionIssue[]): RawBlock => {
-  let name = '';
-  let basePoint: Vec2 = { x: 0, y: 0 };
-  while (!cursor.done() && cursor.peek()!.code !== 0) {
-    const token = cursor.next();
-    if (token.code === 2) name = token.value;
-    else if (token.code === 10) basePoint = { ...basePoint, x: tokenNumber(token) };
-    else if (token.code === 20) basePoint = { ...basePoint, y: tokenNumber(token) };
-    // 8 (layer), 30 (z), 70 (block-type flags), 1/3 (xref paths) — not used.
-  }
-
-  const polylines: RawPolyline[] = [];
-  const lines: RawLine[] = [];
-  const texts: RawText[] = [];
-  const points: RawPoint[] = [];
-  const arcs: RawArc[] = [];
-  const splines: RawSpline[] = [];
-  // Boundary chaining joins runs in the order the file wrote them, and a block
-  // may interleave polylines with arcs and splines. Collecting each kind into
-  // its own array loses that order, so it is stamped on the way past.
-  let order = 0;
-  while (!cursor.done() && !cursor.at('ENDBLK')) {
-    if (cursor.at('POLYLINE')) {
-      cursor.next();
-      polylines.push(readPolyline(cursor, order));
-      order += 1;
-    } else if (cursor.at('LINE')) {
-      cursor.next();
-      lines.push(readLine(cursor));
-    } else if (cursor.at('TEXT')) {
-      cursor.next();
-      texts.push(readText(cursor));
-    } else if (cursor.at('POINT')) {
-      cursor.next();
-      points.push(readPoint(cursor));
-    } else if (cursor.at('ARC')) {
-      cursor.next();
-      arcs.push(readArc(cursor, order));
-      order += 1;
-    } else if (cursor.at('SPLINE')) {
-      cursor.next();
-      splines.push(readSpline(cursor, order));
-      order += 1;
-    } else {
-      const kind = skipEntity(cursor);
-      issues.push({
-        severity: 'warning',
-        code: 'unsupported-entity',
-        message: `Block "${name}": entity "${kind}" is not supported yet and was skipped.`,
-      });
-    }
-  }
-  // ENDBLK carries a layer of its own too — same reasoning as SEQEND above.
-  if (cursor.at('ENDBLK')) {
-    cursor.next();
-    skipFields(cursor);
-  }
-
-  return { name, basePoint, polylines, lines, texts, points, arcs, splines };
-};
-
-const readBlocksSection = (cursor: TokenCursor, issues: ConversionIssue[]): Map<string, RawBlock> => {
-  const blocks = new Map<string, RawBlock>();
-  while (!cursor.done() && !cursor.at('ENDSEC')) {
-    if (cursor.at('BLOCK')) {
-      cursor.next();
-      const block = readBlock(cursor, issues);
-      blocks.set(block.name, block);
-    } else {
-      cursor.next();
-    }
-  }
-  return blocks;
-};
-
-/* --- ENTITIES --------------------------------------------------------------- */
-
-interface RawInsert {
-  readonly blockName: string;
-  readonly insertionPoint: Vec2;
-}
-
-const readInsert = (cursor: TokenCursor, issues: ConversionIssue[]): RawInsert => {
-  let blockName = '';
-  let point: Vec2 = { x: 0, y: 0 };
-  const transform: DxfToken[] = [];
-  while (!cursor.done() && cursor.peek()!.code !== 0) {
-    const token = cursor.next();
-    if (token.code === 2) blockName = token.value;
-    else if (token.code === 10) point = { ...point, x: tokenNumber(token) };
-    else if (token.code === 20) point = { ...point, y: tokenNumber(token) };
-    else if ([41, 42, 43, 44, 50].includes(token.code)) transform.push(token);
-    // 8 (layer), 30 (z) — not used.
-  }
-  if (transform.length > 0) {
-    issues.push({
-      severity: 'warning',
-      code: 'insert-transform-ignored',
-      message: `INSERT of "${blockName}" carries a scale or rotation (group code(s) ${transform
-        .map((t) => t.code)
-        .join(', ')}), which is not applied yet — the block was placed at its insertion point unscaled and unrotated.`,
-    });
-  }
-  return { blockName, insertionPoint: point };
-};
-
-interface RawEntities {
-  readonly inserts: readonly RawInsert[];
-  /** Loose TEXT in ENTITIES — where this file keeps style-wide metadata. */
-  readonly texts: readonly RawText[];
-}
-
-const readEntitiesSection = (cursor: TokenCursor, issues: ConversionIssue[]): RawEntities => {
-  const inserts: RawInsert[] = [];
-  const texts: RawText[] = [];
-  while (!cursor.done() && !cursor.at('ENDSEC')) {
-    if (cursor.at('INSERT')) {
-      cursor.next();
-      inserts.push(readInsert(cursor, issues));
-    } else if (cursor.at('TEXT')) {
-      cursor.next();
-      texts.push(readText(cursor));
-    } else {
-      const kind = skipEntity(cursor);
-      issues.push({
-        severity: 'warning',
-        code: 'unsupported-entity',
-        message: `ENTITIES: "${kind}" was placed directly (not via a BLOCK/INSERT pair) and is not supported yet; skipped.`,
-      });
-    }
-  }
-  return { inserts, texts };
-};
-
-/* --- Driver ------------------------------------------------------------- */
-
-interface ParsedFile {
-  readonly header: Map<string, DxfToken[]>;
-  readonly blocks: Map<string, RawBlock>;
-  readonly inserts: readonly RawInsert[];
-  readonly styleTexts: readonly RawText[];
-}
-
-const parseSections = (cursor: TokenCursor, issues: ConversionIssue[]): ParsedFile => {
-  let header = new Map<string, DxfToken[]>();
-  let blocks = new Map<string, RawBlock>();
-  let inserts: readonly RawInsert[] = [];
-  let styleTexts: readonly RawText[] = [];
-
-  while (!cursor.done()) {
-    const token = cursor.next();
-    if (token.code === 0 && token.value === 'EOF') break;
-    if (token.code !== 0 || token.value !== 'SECTION') continue; // ignore stray tokens between sections
-
-    const nameToken = cursor.peek();
-    const name = nameToken?.code === 2 ? cursor.next().value : '';
-
-    if (name === 'HEADER') header = readHeader(cursor);
-    else if (name === 'BLOCKS') blocks = readBlocksSection(cursor, issues);
-    else if (name === 'ENTITIES') ({ inserts, texts: styleTexts } = readEntitiesSection(cursor, issues));
-    else {
-      skipSection(cursor);
-      issues.push({
-        severity: 'info',
-        code: 'unsupported-section',
-        message: `Section "${name || '(unnamed)'}" is not read yet; skipped.`,
-      });
-    }
-
-    if (cursor.at('ENDSEC')) cursor.next();
-  }
-
-  return { header, blocks, inserts, styleTexts };
-};
-
 /* --- Self-labelled TEXT metadata -------------------------------------------
  *
  * Some writers carry pattern metadata as plain TEXT entities whose string is
@@ -855,9 +372,12 @@ const parseKeyValueTexts = (
 ): {
   readonly fields: Map<string, string>;
   readonly unknown: ReadonlyMap<string, string>;
+  /** `key: kept value ≠ later value` — a field stated twice, disagreeing. */
+  readonly conflicts: readonly string[];
 } => {
   const fields = new Map<string, string>();
   const unknown = new Map<string, string>();
+  const conflicts: string[] = [];
   for (const text of texts) {
     const separator = text.value.indexOf(':');
     if (separator <= 0) continue; // '# 0', piece labels, empty strings — not fields
@@ -868,9 +388,17 @@ const parseKeyValueTexts = (
       if (!unknown.has(key)) unknown.set(key, value);
       continue;
     }
-    if (!fields.has(canonical)) fields.set(canonical, value);
+    const existing = fields.get(canonical);
+    if (existing === undefined) {
+      fields.set(canonical, value);
+    } else if (existing !== value) {
+      // First occurrence wins, as before — but a *disagreeing* repeat is not
+      // a harmless duplicate, it is the file contradicting itself, and which
+      // statement was meant is not this parser's to decide.
+      conflicts.push(`${canonical}: kept "${existing}", ignored "${value}"`);
+    }
   }
-  return { fields, unknown };
+  return { fields, unknown, conflicts };
 };
 
 /**
@@ -1203,6 +731,8 @@ const resolvePieces = (
       curveRuns.push({
         layer: arc.layer,
         order: arc.order,
+        closedFlag: false,
+        entity: 'ARC',
         vertices: [
           { position: resolvedArc.from, bulge: 0, geometry: resolvedArc.geometry },
           { position: resolvedArc.to, bulge: 0 },
@@ -1231,6 +761,8 @@ const resolvePieces = (
       curveRuns.push({
         layer: spline.layer,
         order: spline.order,
+        closedFlag: false,
+        entity: 'SPLINE',
         vertices: converted.points.map((position, i) => ({
           position,
           bulge: 0,
@@ -1343,7 +875,13 @@ const resolvePieces = (
       });
       continue;
     }
-    for (let i = 0; i < chain.joined; i += 1) tally(observations, boundaryLayerUsed, 'POLYLINE', 'outline');
+    // Each joined run reports as the entity it actually was. Curve runs
+    // (ARC/SPLINE) already tallied as 'curve' at conversion — counting them
+    // again here as POLYLINE, which the old code did, mislabelled them.
+    for (const run of boundaryRuns.slice(0, chain.joined)) {
+      if (run.entity === 'ARC' || run.entity === 'SPLINE') continue;
+      tally(observations, boundaryLayerUsed, run.entity, 'outline');
+    }
 
     // LINE entities: kept as geometry, with no claim about what they mean.
     // The layer numbers say "grain line" and "grade reference" in the table,
@@ -1356,7 +894,14 @@ const resolvePieces = (
     );
     for (const line of block.lines) tally(observations, line.layer, 'LINE', 'construction');
 
-    const { fields, unknown } = parseKeyValueTexts(block.texts);
+    const { fields, unknown, conflicts } = parseKeyValueTexts(block.texts);
+    if (conflicts.length > 0) {
+      issues.push({
+        severity: 'warning',
+        code: 'metadata-field-conflict',
+        message: `"${block.name}": the file states the same field twice with different values — ${conflicts.join('; ')}. The first statement was used; the file is ambiguous about the rest.`,
+      });
+    }
     for (const text of block.texts) {
       const isField = text.value.indexOf(':') > 0;
       tally(observations, text.layer, 'TEXT', isField ? 'metadata' : 'skipped');
@@ -1411,6 +956,40 @@ const resolvePieces = (
         severity: 'warning',
         code: 'unsupported-entity',
         message: `"${block.name}": ${count} POINT entit${count === 1 ? 'y' : 'ies'} on layer "${layer}" — that layer has no binding this importer reads points for; skipped.`,
+      });
+    }
+
+    /**
+     * Closure is a claim, and it needs a source. Two are accepted: the vertex
+     * list returning to its start (5109S and the AccuMark chains do this), or
+     * the writer setting the closed flag (the TSHIRT writer sets the flag and
+     * does not repeat the vertex). A boundary with *neither* still becomes a
+     * closed piece — the model has no open pieces — but the closing edge is
+     * then the importer's invention, not the file's, and inventing geometry
+     * silently is the one thing this module must never do. So it is said out
+     * loud, with the length of the edge that was added.
+     */
+    const first = cleaned[0]!;
+    const last = cleaned[cleaned.length - 1]!;
+    const closingGap = Math.hypot(
+      first.position.x - last.position.x,
+      first.position.y - last.position.y,
+    );
+    // Computed on the raw chain, not inferred from cleanRing's count — mid-
+    // ring duplicate collapses also shrink the count, and inferring closure
+    // from "something was dropped" would let them mask a genuinely open ring.
+    const chainFirst = chain.vertices[0]!.position;
+    const chainLast = chain.vertices[chain.vertices.length - 1]!.position;
+    const returnsToStart =
+      chain.vertices.length > 1 &&
+      Math.abs(chainFirst.x - chainLast.x) <= CHAIN_EPSILON &&
+      Math.abs(chainFirst.y - chainLast.y) <= CHAIN_EPSILON;
+    const flagClosed = boundaryRuns.some((run) => run.closedFlag);
+    if (!returnsToStart && !flagClosed && cleaned.length >= 2 && closingGap > VERTEX_EPSILON_MM) {
+      issues.push({
+        severity: 'warning',
+        code: 'boundary-closed-by-importer',
+        message: `"${block.name}": the outline's ends do not meet (${closingGap.toFixed(2)}mm apart) and the file does not mark it closed — neither a repeated end vertex nor the closed flag. It was closed with a straight ${closingGap.toFixed(2)}mm edge because this model has no open pieces, but that edge is the importer's, not the file's. Review it before cutting.`,
       });
     }
 
@@ -1853,7 +1432,18 @@ export const importDxfWithDiagnostics = (
 
   // Style-wide metadata lives as loose TEXT in ENTITIES in at least one real
   // writer's output. Read before units, because `Units:` is one of the fields.
-  const { fields: styleFields, unknown: unknownStyleFields } = parseKeyValueTexts(parsed.styleTexts);
+  const {
+    fields: styleFields,
+    unknown: unknownStyleFields,
+    conflicts: styleConflicts,
+  } = parseKeyValueTexts(parsed.styleTexts);
+  if (styleConflicts.length > 0) {
+    issues.push({
+      severity: 'warning',
+      code: 'metadata-field-conflict',
+      message: `Style metadata states the same field twice with different values — ${styleConflicts.join('; ')}. The first statement was used.`,
+    });
+  }
   for (const text of parsed.styleTexts) {
     tally(observations, text.layer, 'TEXT', text.value.indexOf(':') > 0 ? 'metadata' : 'skipped');
   }

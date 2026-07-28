@@ -1060,5 +1060,259 @@ check(
   check('fixture 3 re-imports deterministically (ids aside)', pieceShape(again.document) === pieceShape(acc.document), 'ok');
 }
 
+/* --- 30. The reader consolidation: safety rules locked ---------------------
+ *
+ * Three rules landed with the reader extraction, all firing on zero real
+ * fixtures (verified by every section above still passing): a boundary the
+ * file never closed is reported when the importer closes it; an INSERT
+ * transform refuses the import instead of warning past wrong geometry; and
+ * self-contradicting metadata is called ambiguous. Each is exercised here
+ * synthetically, since no real file on hand misbehaves in these ways.
+ */
+
+{
+  const doc = (blockBody: string): string =>
+    [
+      '999', 'synthetic check fixture', '0', 'SECTION', '2', 'HEADER',
+      '9', '$INSUNITS', '70', '4', '0', 'ENDSEC',
+      '0', 'SECTION', '2', 'BLOCKS',
+      '0', 'BLOCK', '8', '0', '2', 'CHECK', '70', '0', '10', '0.0', '20', '0.0', '30', '0.0', '3', 'CHECK', '1', '',
+      blockBody,
+      '0', 'ENDBLK', '8', '0', '0', 'ENDSEC',
+      '0', 'SECTION', '2', 'ENTITIES',
+      '0', 'INSERT', '8', '1', '2', 'CHECK', '10', '0.0', '20', '0.0', '30', '0.0',
+      '0', 'ENDSEC', '0', 'EOF',
+    ].join('\n') + '\n';
+
+  const vertex = (x: number, y: number): string =>
+    ['0', 'VERTEX', '8', '1', '10', String(x), '20', String(y), '30', '0.0'].join('\n');
+  const openU = (flag: number): string =>
+    [
+      '0', 'POLYLINE', '8', '1', '66', '1', '70', String(flag),
+      vertex(0, 0), vertex(100, 0), vertex(100, 50), vertex(0, 50),
+      '0', 'SEQEND', '8', '1',
+    ].join('\n');
+
+  // A U-shape whose ends sit 50mm apart. Closed by the importer, and said so.
+  const open = importDxfWithDiagnostics(doc(openU(0)), { flavour: 'aama', assumeUnit: 'mm' });
+  check(
+    'an outline the file never closed is reported when the importer closes it',
+    open.issues.some(
+      (i) => i.code === 'boundary-closed-by-importer' && i.severity === 'warning' && i.message.includes('50.00mm'),
+    ),
+    open.issues.find((i) => i.code === 'boundary-closed-by-importer')?.message ?? 'missing',
+  );
+  check('…and the piece still imports, closed, rather than being dropped', open.document.pieces.length === 1 && open.document.pieces[0]!.closed, `${open.document.pieces.length}`);
+
+  // The same shape with the closed flag set: the file authorised the closing
+  // edge, so nothing is reported. This is the TSHIRT writer's style.
+  const flagged = importDxfWithDiagnostics(doc(openU(1)), { flavour: 'aama', assumeUnit: 'mm' });
+  check(
+    'the closed flag authorises the closing edge — no warning',
+    !flagged.issues.some((i) => i.code === 'boundary-closed-by-importer'),
+    'ok',
+  );
+
+  // An INSERT that scales: refused, not imported wrong. Spliced into the real
+  // 5109S fixture so everything else about the file is genuine.
+  {
+    // Scanning for "the next 0 line" is a trap here — coordinate *values* are
+    // 0 too. The splice anchors on the INSERT's block-name line instead, which
+    // is unambiguous, and drops the scale field straight after it (field
+    // order within an entity is free in DXF).
+    const eol = fixture.includes('\r\n') ? '\r\n' : '\n';
+    const anchor = `${eol}INSERT${eol}8${eol}1${eol}2${eol}AW27-213 -COST-5109S${eol}`;
+    const at = fixture.indexOf(anchor);
+    check('fixture 1 has an INSERT to splice a transform into', at > 0, String(at));
+    const scaled =
+      fixture.slice(0, at + anchor.length) + `41${eol}2.0${eol}` + fixture.slice(at + anchor.length);
+    const result = importDxfWithDiagnostics(scaled, { flavour: 'aama', assumeUnit: 'mm' });
+    check(
+      'a scaled INSERT is an error naming the refusal, not a warning past wrong geometry',
+      result.issues.some(
+        (i) => i.code === 'insert-transform-unsupported' && i.severity === 'error' && i.message.includes('refused'),
+      ),
+      result.issues.find((i) => i.code === 'insert-transform-unsupported')?.message ?? 'missing',
+    );
+    let threw = false;
+    try {
+      importDxf(scaled, { flavour: 'aama', assumeUnit: 'mm' });
+    } catch {
+      threw = true;
+    }
+    check('…and importDxf refuses the whole file', threw, String(threw));
+  }
+
+  // A field stated twice with different values is ambiguity, reported.
+  {
+    const conflicted = doc(
+      [
+        openU(1),
+        ['0', 'TEXT', '8', '1', '10', '1.0', '20', '1.0', '30', '0.0', '40', '1.0', '1', 'Piece Name: First'].join('\n'),
+        ['0', 'TEXT', '8', '1', '10', '2.0', '20', '2.0', '30', '0.0', '40', '1.0', '1', 'Piece Name: Second'].join('\n'),
+      ].join('\n'),
+    );
+    const result = importDxfWithDiagnostics(conflicted, { flavour: 'aama', assumeUnit: 'mm' });
+    check(
+      'a field stated twice with different values is reported as the file contradicting itself',
+      result.issues.some(
+        (i) =>
+          i.code === 'metadata-field-conflict' &&
+          i.message.includes('kept "First"') &&
+          i.message.includes('ignored "Second"'),
+      ),
+      result.issues.find((i) => i.code === 'metadata-field-conflict')?.message ?? 'missing',
+    );
+    check('the first statement wins, as documented', result.document.pieces[0]!.name === 'First', result.document.pieces[0]!.name);
+    check(
+      'a harmless exact repeat is NOT called a conflict',
+      !importDxfWithDiagnostics(
+        doc([openU(1),
+          ['0', 'TEXT', '8', '1', '10', '1.0', '20', '1.0', '30', '0.0', '40', '1.0', '1', 'Piece Name: Same'].join('\n'),
+          ['0', 'TEXT', '8', '1', '10', '2.0', '20', '2.0', '30', '0.0', '40', '1.0', '1', 'Piece Name: Same'].join('\n'),
+        ].join('\n')),
+        { flavour: 'aama', assumeUnit: 'mm' },
+      ).issues.some((i) => i.code === 'metadata-field-conflict'),
+      'ok',
+    );
+  }
+
+}
+
+/* --- 31. LWPOLYLINE reads into the same raw shape POLYLINE does ------------
+ *
+ * The lightweight polyline inlines its vertices as repeating 10/20/42 groups
+ * on one entity instead of writing VERTEX entities. Read it into the same
+ * `RawPolyline` record, and every downstream stage — chaining, cleaning,
+ * bulge resolution, closure — is shared, not duplicated. The proof is
+ * structural: the same outline written both ways must produce the same piece.
+ *
+ * Still synthetic: no vendor pattern export on hand uses LWPOLYLINE (the
+ * survey that established that is in reader.ts's history); these lock the
+ * format reading so the first real file that uses it lands on tested ground.
+ */
+
+{
+  const doc = (blockBody: string): string =>
+    [
+      '999', 'synthetic LWPOLYLINE check', '0', 'SECTION', '2', 'HEADER',
+      '9', '$INSUNITS', '70', '4', '0', 'ENDSEC',
+      '0', 'SECTION', '2', 'BLOCKS',
+      '0', 'BLOCK', '8', '0', '2', 'LW', '70', '0', '10', '0.0', '20', '0.0', '30', '0.0', '3', 'LW', '1', '',
+      blockBody,
+      '0', 'ENDBLK', '8', '0', '0', 'ENDSEC',
+      '0', 'SECTION', '2', 'ENTITIES',
+      '0', 'INSERT', '8', '1', '2', 'LW', '10', '0.0', '20', '0.0', '30', '0.0',
+      '0', 'ENDSEC', '0', 'EOF',
+    ].join('\n') + '\n';
+
+  // One outline, written both ways: a square whose top edge bulges outward.
+  const COORDS: ReadonlyArray<readonly [number, number, number]> = [
+    [0, 0, 0], [100, 0, 0], [100, 100, 1], [0, 100, 0],
+  ];
+  const asPolyline = [
+    '0', 'POLYLINE', '8', '1', '66', '1', '70', '1',
+    ...COORDS.flatMap(([x, y, b]) => [
+      '0', 'VERTEX', '8', '1', '10', String(x), '20', String(y), '30', '0.0',
+      ...(b !== 0 ? ['42', String(b)] : []),
+    ]),
+    '0', 'SEQEND', '8', '1',
+  ].join('\n');
+  const asLwPolyline = [
+    '0', 'LWPOLYLINE', '8', '1', '90', String(COORDS.length), '70', '1',
+    ...COORDS.flatMap(([x, y, b]) => ['10', String(x), '20', String(y), ...(b !== 0 ? ['42', String(b)] : [])]),
+  ].join('\n');
+
+  const heavy = importDxfWithDiagnostics(doc(asPolyline), { flavour: 'aama', assumeUnit: 'mm' });
+  const light = importDxfWithDiagnostics(doc(asLwPolyline), { flavour: 'aama', assumeUnit: 'mm' });
+
+  check(
+    'the same outline as POLYLINE and as LWPOLYLINE produces the same piece',
+    pieceShape(light.document) === pieceShape(heavy.document),
+    pieceShape(light.document) === pieceShape(heavy.document) ? 'ok' : `${pieceShape(light.document)} vs ${pieceShape(heavy.document)}`,
+  );
+  check(
+    'the bulge on an inline vertex becomes the same arc',
+    light.document.pieces[0]!.segments.filter((s) => s.geometry.kind === 'arc').length === 1,
+    JSON.stringify(light.document.pieces[0]!.segments.map((s) => s.geometry.kind)),
+  );
+  check(
+    'the layer report names LWPOLYLINE, not a flattened POLYLINE',
+    light.layers.some((l) => l.entity === 'LWPOLYLINE' && l.treatment === 'outline') &&
+      !light.layers.some((l) => l.entity === 'POLYLINE'),
+    JSON.stringify(light.layers.map((l) => `${l.entity}/${l.treatment}`)),
+  );
+  check(
+    'the closed flag on an LWPOLYLINE authorises the closing edge',
+    !light.issues.some((i) => i.code === 'boundary-closed-by-importer'),
+    'ok',
+  );
+  check('no unsupported-entity warning fires for a read LWPOLYLINE', !light.issues.some((i) => i.code === 'unsupported-entity'), 'ok');
+
+  // A bulge on the *last* vertex curves the closing edge. The wrap-around is
+  // where an off-by-one in positional vertex parsing would land, so it gets
+  // its own check.
+  const closingBulge = importDxfWithDiagnostics(
+    doc(['0', 'LWPOLYLINE', '8', '1', '90', '4', '70', '1',
+      '10', '0', '20', '0', '10', '100', '20', '0', '10', '100', '20', '100', '10', '0', '20', '100', '42', '1',
+    ].join('\n')),
+    { flavour: 'aama', assumeUnit: 'mm' },
+  );
+  {
+    const piece = closingBulge.document.pieces[0]!;
+    const kinds = piece.segments.map((s) => s.geometry.kind);
+    check('a bulge on the last vertex curves the closing edge, via the existing wrap', JSON.stringify(kinds) === JSON.stringify(['line', 'line', 'line', 'arc']), JSON.stringify(kinds));
+  }
+
+  /* --- Malformed inline vertex data ---------------------------------------- */
+
+  // Orphaned fields: a 20 and a 42 before any 10 opened a vertex.
+  const orphaned = importDxfWithDiagnostics(
+    doc(['0', 'LWPOLYLINE', '8', '1', '90', '3', '70', '1',
+      '20', '5', '42', '0.5',
+      '10', '0', '20', '0', '10', '100', '20', '0', '10', '50', '20', '80',
+    ].join('\n')),
+    { flavour: 'aama', assumeUnit: 'mm' },
+  );
+  check(
+    'vertex fields arriving before any vertex are dropped and reported, not invented',
+    orphaned.issues.some((i) => i.code === 'lwpolyline-orphaned-fields' && i.message.includes('2 vertex field(s)')),
+    orphaned.issues.find((i) => i.code === 'lwpolyline-orphaned-fields')?.message ?? 'missing',
+  );
+  check('…and the real vertices still import', orphaned.document.pieces[0]?.points.filter((p) => p.role !== 'construction').length === 3, String(orphaned.document.pieces[0]?.points.length));
+
+  // Declared count disagrees with the vertices actually present.
+  const miscounted = importDxfWithDiagnostics(
+    doc(['0', 'LWPOLYLINE', '8', '1', '90', '5', '70', '1',
+      '10', '0', '20', '0', '10', '100', '20', '0', '10', '50', '20', '80',
+    ].join('\n')),
+    { flavour: 'aama', assumeUnit: 'mm' },
+  );
+  check(
+    'a declared vertex count that disagrees with the data is reported',
+    miscounted.issues.some((i) => i.code === 'lwpolyline-vertex-count-mismatch' && i.message.includes('declares 5') && i.message.includes('carries 3')),
+    miscounted.issues.find((i) => i.code === 'lwpolyline-vertex-count-mismatch')?.message ?? 'missing',
+  );
+
+  // No vertices at all: warned and skipped, never a crash or an empty run.
+  const empty = importDxfWithDiagnostics(
+    doc([
+      ['0', 'LWPOLYLINE', '8', '1', '90', '0', '70', '0'].join('\n'),
+      asLwPolyline,
+    ].join('\n')),
+    { flavour: 'aama', assumeUnit: 'mm' },
+  );
+  check(
+    'an empty LWPOLYLINE is warned about and skipped',
+    empty.issues.some((i) => i.code === 'lwpolyline-empty'),
+    empty.issues.find((i) => i.code === 'lwpolyline-empty')?.message ?? 'missing',
+  );
+  check(
+    '…and does not break the real boundary that follows it',
+    empty.document.pieces.length === 1 && pieceShape(empty.document) === pieceShape(light.document),
+    `${empty.document.pieces.length} piece(s)`,
+  );
+}
+
 console.log(failures === 0 ? '\nAll DXF import checks passed.' : `\n${failures} DXF import check(s) FAILED.`);
 process.exit(failures === 0 ? 0 : 1);

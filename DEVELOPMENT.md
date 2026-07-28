@@ -137,7 +137,7 @@ overrides work. `npm run check:offset` verifies it against hand-derivable
 answers — squares, an L, a slot narrower than twice the offset, and a circle.
 
 `npm run check` runs all five self-check suites — curve, offset, round-trip,
-grading, DXF import, the DXF rule table and DXF curves, 447 assertions. They
+grading, DXF import, the DXF rule table and DXF curves, 473 assertions. They
 are not a test framework and are
 not an argument for adding one; they exist because this is the code whose
 mistakes look plausible on screen and only show up in someone's cut file.
