@@ -49,9 +49,17 @@ export type NestEngine = 'shelf' | 'heuristic';
 
 export const NEST_ENGINES: readonly NestEngine[] = ['shelf', 'heuristic'];
 
+/**
+ * What an engine is called, wherever it is named.
+ *
+ * The same two strings the mode menu uses for the pinned engines, with no
+ * decoration: an engine that reads "Shelf" in the dropdown and "Shelf (fast)"
+ * in the status line looks like two engines. Which one is quicker belongs in
+ * the mode note, where there is room to say it once.
+ */
 export const ENGINE_LABELS: Record<NestEngine, string> = {
-  shelf: 'Shelf (fast)',
-  heuristic: 'Bottom-left fill (tight)',
+  shelf: 'Shelf',
+  heuristic: 'Bottom-left fill',
 };
 
 /* --- Heuristic adapters -------------------------------------------------- */

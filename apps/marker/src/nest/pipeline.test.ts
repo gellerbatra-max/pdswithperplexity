@@ -7,6 +7,7 @@ import { NO_SPACING, type NestPiece, type NestPlacement, type NestRequest } from
 import { compareScores } from './scoring';
 import {
   compareEngines,
+  ENGINE_LABELS,
   enginesForMode,
   MODE_LABELS,
   MODE_NOTES,
@@ -558,5 +559,40 @@ describe('best of both', () => {
     expect(best.plan.placements).toEqual([]);
     expect(best.plan.unplaced).toEqual(['huge']);
     expect(best.score.stability).toBe(1);
+  });
+});
+
+describe('the agreed naming and mapping', () => {
+  // Pinned to the spec, so a rename or a remap has to be a deliberate edit
+  // here rather than something that quietly drifts.
+
+  it('names the engines exactly as the UI does', () => {
+    expect(ENGINE_LABELS.shelf).toBe('Shelf');
+    expect(ENGINE_LABELS.heuristic).toBe('Bottom-left fill');
+  });
+
+  it('gives a pinned mode the same name as its engine', () => {
+    // "Shelf" in the dropdown and "Shelf (fast)" in the status line reads as
+    // two different engines.
+    expect(MODE_LABELS.shelf).toBe(ENGINE_LABELS.shelf);
+    expect(MODE_LABELS.heuristic).toBe(ENGINE_LABELS.heuristic);
+  });
+
+  it('maps every mode to the agreed engine', () => {
+    expect(enginesForMode('fastest')).toEqual(['shelf']);
+    expect(enginesForMode('shelf')).toEqual(['shelf']);
+    expect(enginesForMode('tightest')).toEqual(['heuristic']);
+    expect(enginesForMode('heuristic')).toEqual(['heuristic']);
+    expect(enginesForMode('best')).toEqual(['shelf', 'heuristic']);
+  });
+
+  it('keeps bottom-left fill in heuristic.ts and shelf packing in shelf.ts', () => {
+    // The two engines are not interchangeable names for one algorithm: BLF
+    // scans for the first legal position, shelf lays rows across the fabric.
+    // On ragged widths they disagree, which is the proof they are distinct.
+    const ragged = [piece('a', 40, 55), piece('b', 30, 35), piece('c', 25, 30)];
+    const shelf = runNest(request({ pieces: ragged }), 'shelf');
+    const blf = runNest(request({ pieces: ragged }), 'heuristic');
+    expect(shelf.placements).not.toEqual(blf.placements);
   });
 });
