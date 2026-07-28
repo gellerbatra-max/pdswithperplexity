@@ -119,9 +119,13 @@ export const HomeScreen = ({ persistence }: { persistence?: Persistence | undefi
   );
 
   const empty = !loading && all.length === 0;
+  // Both the header buttons and the empty state offer the same two ways in,
+  // so they go through one handler each rather than duplicating the wiring.
+  const chooseFile = () => fileRef.current?.click();
+  const startBlank = () => setDialogOpen(true);
 
   return (
-    <div
+    <main
       className="home"
       data-dropping={dropping || undefined}
       onDragOver={(event) => {
@@ -151,50 +155,64 @@ export const HomeScreen = ({ persistence }: { persistence?: Persistence | undefi
         </p>
       </header>
 
-      <div className="home__actions">
-        <button
-          type="button"
-          className="home__action home__action--primary"
-          onClick={() => fileRef.current?.click()}
-          disabled={busy !== null}
-        >
-          <span className="home__action-title">Open a file</span>
-          <span className="home__action-note">
-            AAMA or ASTM DXF, or a .marker.json you exported
-          </span>
-        </button>
+      {/*
+       * The input is driven by the buttons and lives outside them, because
+       * the first-run panel and the header row both reach for the same ref.
+       */}
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".dxf,.rul,.json"
+        multiple
+        className="home__file"
+        onChange={(event) => {
+          void ingest([...(event.target.files ?? [])]);
+          // Clear it, or choosing the same file twice fires no change event.
+          event.target.value = '';
+        }}
+      />
 
-        <button
-          type="button"
-          className="home__action"
-          onClick={() => setDialogOpen(true)}
-          disabled={busy !== null}
-        >
-          <span className="home__action-title">New blank marker</span>
-          <span className="home__action-note">Start from an empty roll</span>
-        </button>
+      {/*
+       * With no markers the header row and the empty state would offer the
+       * same two buttons twice over, so first run gets one panel and nothing
+       * else. There is exactly one next step, and it is on the screen once.
+       */}
+      {empty ? null : (
+        <>
+          <div className="home__actions">
+            <button
+              type="button"
+              className="home__action home__action--primary"
+              onClick={chooseFile}
+              disabled={busy !== null}
+            >
+              <span className="home__action-title">Open a file</span>
+              <span className="home__action-note">
+                AAMA or ASTM DXF, or a .marker.json you exported
+              </span>
+            </button>
 
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".dxf,.rul,.json"
-          multiple
-          className="home__file"
-          onChange={(event) => {
-            void ingest([...(event.target.files ?? [])]);
-            // Clear it, or choosing the same file twice fires no change event.
-            event.target.value = '';
-          }}
-        />
-      </div>
+            <button
+              type="button"
+              className="home__action"
+              onClick={startBlank}
+              disabled={busy !== null}
+            >
+              <span className="home__action-title">New blank marker</span>
+              <span className="home__action-note">Start from an empty roll</span>
+            </button>
+          </div>
 
-      <p className="home__hint">
-        {busy ?? 'You can also drag a file anywhere onto this screen.'}
-      </p>
+          <p className="home__hint">
+            {busy ?? 'You can also drag a file anywhere onto this screen.'}
+          </p>
+        </>
+      )}
 
       <section className="home__recent">
         <header className="home__recent-header">
-          <h2 className="home__section-title">Recent markers</h2>
+          {/* "Recent markers" over an empty panel labels a list that isn't there. */}
+          {empty ? null : <h2 className="home__section-title">Recent markers</h2>}
 
           {all.length > 0 ? (
             <div className="home__controls">
@@ -231,22 +249,49 @@ export const HomeScreen = ({ persistence }: { persistence?: Persistence | undefi
         {loading ? (
           <p className="home__empty">Reading local storage…</p>
         ) : empty ? (
-          <div className="home__blank">
+          // Nothing to list, so the empty state carries the two ways in
+          // rather than only describing them.
+          <div className="home__blank home__blank--first">
             <p className="home__blank-title">No markers yet</p>
             <p className="home__blank-note">
               Open a DXF to bring in an order&apos;s pieces, or start a blank marker and set the
-              fabric width yourself. Markers you make appear here, saved in this browser.
+              fabric width yourself. Everything you make is saved in this browser and stays on
+              this machine.
+            </p>
+            <div className="home__blank-actions">
+              <button
+                type="button"
+                className="home__blank-button"
+                onClick={chooseFile}
+                disabled={busy !== null}
+              >
+                Open a file
+              </button>
+              <button
+                type="button"
+                className="home__blank-button"
+                onClick={startBlank}
+                disabled={busy !== null}
+              >
+                New blank marker
+              </button>
+            </div>
+            <p className="home__blank-note home__blank-note--quiet">
+              {busy ?? 'Or drag a .dxf or .marker.json file anywhere onto this screen.'}
             </p>
           </div>
         ) : shown.length === 0 ? (
           <div className="home__blank">
             <p className="home__blank-title">Nothing matches “{query}”</p>
             <p className="home__blank-note">
-              Search covers the marker name, its order model and its status.
+              None of your {all.length} marker{all.length === 1 ? '' : 's'} match. Search covers
+              the marker name, its order model and its status.
             </p>
-            <button type="button" className="topbar__button" onClick={() => setQuery('')}>
-              Clear search
-            </button>
+            <div className="home__blank-actions">
+              <button type="button" className="home__blank-button" onClick={() => setQuery('')}>
+                Clear search
+              </button>
+            </div>
           </div>
         ) : (
           <ul className="home__grid">
@@ -287,6 +332,6 @@ export const HomeScreen = ({ persistence }: { persistence?: Persistence | undefi
           }}
         />
       ) : null}
-    </div>
+    </main>
   );
 };

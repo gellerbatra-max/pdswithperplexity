@@ -820,16 +820,32 @@ select {
 
 /* --- Home screen -------------------------------------------------------- */
 
+/*
+ * One block owns the hub. The controls, empty states and card styling used to
+ * sit in a second block further down that overrode this one, which meant every
+ * change had to be reasoned about twice.
+ *
+ * `--hub-width` is the single measurement the whole page aligns to: header,
+ * actions, hint and grid all share it, so nothing drifts out of column.
+ */
+
 .home {
+  position: relative;
   height: 100%;
   overflow-y: auto;
   padding: var(--space-7) var(--space-6) var(--space-8);
   background: var(--surface-app);
+  --hub-width: 1280px;
+}
+
+.home[data-dropping] {
+  outline: 1px dashed var(--accent-line);
+  outline-offset: -12px;
 }
 
 .home__header {
-  max-width: 1100px;
-  margin: 0 auto var(--space-6);
+  max-width: var(--hub-width);
+  margin: 0 auto var(--space-5);
 }
 
 .home__title {
@@ -847,8 +863,8 @@ select {
 
 .home__actions {
   display: flex;
-  max-width: 1100px;
-  margin: 0 auto var(--space-5);
+  max-width: var(--hub-width);
+  margin: 0 auto var(--space-3);
   gap: var(--space-4);
   flex-wrap: wrap;
 }
@@ -899,19 +915,41 @@ select {
 
 .home__busy,
 .home__empty {
-  max-width: 1100px;
+  max-width: var(--hub-width);
   margin: 0 auto var(--space-4);
   font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
+/*
+ * Small print on the hub uses --text-muted, not --text-faint. Faint is
+ * #6d7686, which is 3.8:1 on the panel and 4.1:1 on the app background —
+ * both under the 4.5:1 floor, and this is the screen a new user reads first.
+ * Muted clears it at 5.0:1 and is still clearly secondary to the names.
+ */
+.home__hint {
+  max-width: var(--hub-width);
+  margin: 0 auto var(--space-6);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
 .home__recent {
-  max-width: 1100px;
+  max-width: var(--hub-width);
   margin: 0 auto;
 }
 
+.home__recent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+}
+
 .home__section-title {
-  margin: 0 0 var(--space-3);
+  margin: 0;
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
   letter-spacing: var(--tracking-wide);
@@ -919,16 +957,143 @@ select {
   color: var(--text-muted);
 }
 
+.home__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.home__search {
+  width: 220px;
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font-size: var(--text-xs);
+}
+
+.home__search:focus-visible {
+  outline: 1px solid var(--accent);
+  border-color: var(--accent);
+}
+
+.home__sort {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.home__sort .field__input {
+  width: auto;
+  height: var(--control-height);
+}
+
+/*
+ * 200px columns rather than 240: a marker is identified by its name and its
+ * utilisation, both of which fit, and the extra column per row is what turns
+ * a wall of cards into something scannable.
+ */
 .home__grid {
   display: grid;
   margin: 0;
   padding: 0;
-  gap: var(--space-4);
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   list-style: none;
 }
 
+/* --- Home screen: empty states ------------------------------------------- */
+
+.home__blank {
+  max-width: 560px;
+  padding: var(--space-6);
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+}
+
+/* First run has nothing else on the page, so it carries the weight. */
+.home__blank--first {
+  max-width: 620px;
+  margin-top: var(--space-2);
+  padding: var(--space-7);
+}
+
+.home__blank-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.home__blank-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-medium);
+}
+
+.home__blank-note {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--text-muted);
+}
+
+.home__blank-note--quiet {
+  margin: var(--space-4) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.home__blank-actions {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.home__blank-button {
+  height: var(--control-height);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.home__blank-button:hover {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.home__blank-actions .home__blank-button:first-child {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+/* Sits above the hub while a file is over it, so the target is unmistakable. */
+.home__dropzone {
+  position: fixed;
+  inset: var(--space-5);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-xl);
+  background: rgba(16, 19, 25, 0.82);
+  font-size: var(--text-xl);
+  color: var(--accent-strong);
+  pointer-events: none;
+}
+
 /* --- Recent marker card -------------------------------------------------- */
+
+/*
+ * Three rows under the thumbnail, each anchored left and right the same way on
+ * every card: name / utilisation, then the numbers, then status / recency.
+ * Reading a column of cards straight down compares like with like.
+ */
 
 .card {
   display: flex;
@@ -944,44 +1109,96 @@ select {
 }
 
 .card__open {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: 0 0 var(--space-3);
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
   border: none;
   background: none;
-  text-align: left;
   cursor: pointer;
 }
 
 .card__thumb {
   display: block;
   width: 100%;
-  height: 96px;
+  height: 76px;
   background: var(--surface-stage);
   border-bottom: 1px solid var(--border-subtle);
 }
 
+/*
+ * Named, not implied. The thumbnail is the primary way into a marker, so it
+ * says so at rest — a hover-only cue is no cue at all on a touch screen.
+ */
+.card__open-hint {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  /*
+   * Opaque enough to be its own background. The chip can land over the pale
+   * fabric of a full-width thumbnail, where a lighter scrim plus muted text
+   * falls to 2.2:1; this pairing holds at 11:1 over fabric and over stage.
+   */
+  background: rgba(16, 19, 25, 0.88);
+  font-size: var(--text-2xs);
+  color: var(--text-primary);
+}
+
+.card__open:hover .card__open-hint,
+.card__open:focus-visible .card__open-hint {
+  background: var(--accent);
+  color: var(--text-inverse);
+}
+
+.card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-3) var(--space-2);
+}
+
+.card__headline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
 .card__name {
-  padding: var(--space-3) var(--space-4) 0;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--text-md);
   font-weight: var(--weight-medium);
+  text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
 }
 
-.card__meta {
-  padding: 0 var(--space-4);
-  font-size: var(--text-2xs);
-  color: var(--text-faint);
+.card__name:hover {
+  color: var(--accent-strong);
 }
 
-.card__stats {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-4) 0;
-  font-size: var(--text-xs);
+.card__rename {
+  width: 100%;
+  height: var(--control-height-sm);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font-size: var(--text-md);
+  outline: none;
+}
+
+.card__util {
+  flex: none;
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
 }
 
@@ -997,39 +1214,83 @@ select {
   color: var(--util-good);
 }
 
-.card__length,
-.card__consumption {
-  color: var(--text-faint);
+.card__meta {
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.card__stats .ribbon__status {
-  margin-left: auto;
+.card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
 }
 
+.card__when {
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+/*
+ * Pushed to the bottom so the row sits on the same line across a grid row
+ * whatever the card above it did, and drawn as buttons at rest rather than as
+ * grey text that only looks pressable once hovered.
+ */
 .card__actions {
   display: flex;
+  margin-top: auto;
   gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-2);
   border-top: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
 }
 
 .card__action {
+  flex: 1 1 auto;
   padding: var(--space-1) var(--space-2);
-  border: none;
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
-  background: none;
+  background: var(--surface-raised);
   font-size: var(--text-2xs);
-  color: var(--text-muted);
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
 .card__action:hover {
+  border-color: var(--border-strong);
   background: var(--surface-hover);
   color: var(--text-primary);
 }
 
 .card__action--danger {
   color: var(--danger);
+}
+
+.card__action--danger:hover {
+  border-color: var(--danger);
+  background: rgba(201, 113, 130, 0.12);
+  color: var(--danger);
+}
+
+.card__actions--confirm {
+  align-items: center;
+  background: rgba(201, 113, 130, 0.08);
+}
+
+.card__confirm-text {
+  flex: 1 1 100%;
+  padding-bottom: var(--space-1);
+  font-size: var(--text-2xs);
+  color: var(--danger);
+}
+
+.card[data-confirming] {
+  border-color: var(--danger);
 }
 
 /* --- Dialog -------------------------------------------------------------- */
@@ -1198,183 +1459,4 @@ select {
   background: none;
   color: var(--accent-strong);
   font-weight: var(--weight-semibold);
-}
-
-/* --- Home hub: controls, empty states, dropzone -------------------------- */
-
-.home {
-  position: relative;
-}
-
-.home[data-dropping] {
-  outline: 1px dashed var(--accent-line);
-  outline-offset: -12px;
-}
-
-.home__hint {
-  max-width: 1100px;
-  margin: 0 auto var(--space-6);
-  font-size: var(--text-xs);
-  color: var(--text-faint);
-}
-
-.home__recent-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  margin-bottom: var(--space-3);
-  flex-wrap: wrap;
-}
-
-.home__section-title {
-  margin: 0;
-}
-
-.home__controls {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-}
-
-.home__search {
-  width: 220px;
-  height: var(--control-height);
-  padding: 0 var(--space-3);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
-  background: var(--surface-sunken);
-  font-size: var(--text-xs);
-}
-
-.home__search:focus-visible {
-  outline: 1px solid var(--accent);
-  border-color: var(--accent);
-}
-
-.home__sort {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.home__sort .field__input {
-  width: auto;
-  height: var(--control-height);
-}
-
-.home__blank {
-  max-width: 560px;
-  padding: var(--space-6);
-  border: 1px dashed var(--border-default);
-  border-radius: var(--radius-lg);
-  background: var(--surface-panel);
-}
-
-.home__blank-title {
-  margin: 0 0 var(--space-2);
-  font-size: var(--text-lg);
-  font-weight: var(--weight-medium);
-}
-
-.home__blank-note {
-  margin: 0 0 var(--space-4);
-  font-size: var(--text-sm);
-  line-height: var(--leading-normal);
-  color: var(--text-muted);
-}
-
-.home__blank-note:last-child {
-  margin-bottom: 0;
-}
-
-/* Sits above the hub while a file is over it, so the target is unmistakable. */
-.home__dropzone {
-  position: fixed;
-  inset: var(--space-5);
-  z-index: 30;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 2px dashed var(--accent);
-  border-radius: var(--radius-xl);
-  background: rgba(16, 19, 25, 0.82);
-  font-size: var(--text-xl);
-  color: var(--accent-strong);
-  pointer-events: none;
-}
-
-/* --- Card: rename and clearer actions ------------------------------------ */
-
-.card__body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  padding: var(--space-3) var(--space-4) var(--space-3);
-}
-
-.card__open {
-  display: block;
-  width: 100%;
-  padding: 0;
-  border: none;
-  background: none;
-  cursor: pointer;
-}
-
-.card__name {
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--text-primary);
-  font-size: var(--text-md);
-  font-weight: var(--weight-medium);
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.card__name:hover {
-  color: var(--accent-strong);
-}
-
-.card__rename {
-  width: 100%;
-  height: var(--control-height-sm);
-  padding: 0 var(--space-2);
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-sm);
-  background: var(--surface-sunken);
-  font-size: var(--text-md);
-  outline: none;
-}
-
-.card__meta,
-.card__stats {
-  padding: 0;
-}
-
-.card__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
-  border-top: 1px solid var(--border-subtle);
-}
-
-.card__actions--confirm {
-  align-items: center;
-  background: rgba(201, 113, 130, 0.08);
-}
-
-.card__confirm-text {
-  flex: 1;
-  font-size: var(--text-2xs);
-  color: var(--danger);
-}
-
-.card[data-confirming] {
-  border-color: var(--danger);
 }

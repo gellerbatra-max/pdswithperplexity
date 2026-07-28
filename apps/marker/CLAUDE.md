@@ -1182,6 +1182,64 @@ the overlay strobes.
 ✓ Verify: home-first navigation is unchanged; labels and rendering are
   untouched.
 
+### Phase 1 Step 10 — Hub density and list interactions
+
+Step 9 made the home screen do the work. This pass makes it readable at a
+glance and consolidates the styling it was built on.
+
+**One block owns the hub.** The controls, empty states and card styling had
+been appended below the original home block and were overriding it — the same
+selector defined twice, 300 lines apart. Every change had to be reasoned about
+in two places, and a third pass would have made that permanent. `--hub-width`
+is now the single measurement the header, actions, hint and grid all align to.
+
+**Cards are 200px columns, not 240.** A marker is identified by its name and
+its utilisation, both of which fit at that width, and the extra column per row
+is what turns a wall of cards into something scannable. Under the thumbnail
+are three tight rows, each anchored the same way on every card — name /
+utilisation, then the numbers, then status / recency — so a column of cards
+can be read straight down and compared. The action row is pushed down with
+`margin-top: auto` so it lands on the same line across a grid row.
+
+Width × length is written compactly (`160 × 108 cm`) with the spelled-out
+form in the tooltip. The long form truncated at 200px, and a measurement that
+ends in an ellipsis is worse than no measurement.
+
+**Actions are drawn as buttons at rest.** They were already always-visible,
+but styled as borderless grey text that only looked pressable once hovered —
+visible is not the same as discoverable. Open is now named on the thumbnail
+rather than implied, which leaves Rename / Duplicate / Delete as three equal
+chips that fit one row at the narrower column width.
+
+**First run gets one panel and nothing else.** The header pair and the empty
+state were offering the same two buttons twice over. With no markers, the
+header row, the drag hint and the "Recent markers" heading are all suppressed:
+there is exactly one next step and it is on screen once. The no-match state
+says how many markers it is hiding, because "nothing matches" over a library
+of forty reads as data loss.
+
+**Contrast is a floor, not a preference.** `--text-faint` is #6d7686: 3.8:1 on
+the panel and 4.1:1 on the app background, both under 4.5:1. The hub's small
+print uses `--text-muted` (5.0:1) instead. The token itself is left alone —
+it is PDS's, and PDS must stay byte-identical.
+
+The "Open" chip can land over the pale fabric of a full-width thumbnail, where
+a light scrim plus muted text falls to 2.2:1; it is opaque enough to be its
+own background and holds at 11:1 over fabric and stage alike.
+
+**The app had no `<main>`.** Both branches of `App` now claim one — they are
+never both mounted. Lighthouse accessibility went 86 → 100; the earlier 100
+predates home-first navigation, when the audit only ever saw the workspace.
+
+✓ Verify: six columns at 1512px, with every card's rows aligned across a row.
+✓ Verify: both empty states, including first run with no duplicate buttons.
+✓ Verify: rename, duplicate and delete-with-confirmation all work at the
+  narrower width, and read as buttons before they are hovered.
+✓ Verify: search covers name, order model and status; all four sorts hold.
+✓ Verify: drag-to-open still works and does not strobe when the pointer
+  crosses a card.
+✓ Verify: 97 / 100 / 96 / 91 on Lighthouse; PDS byte-identical; 437 tests.
+
 ---
 
 ## Replying to Claude After Each Step

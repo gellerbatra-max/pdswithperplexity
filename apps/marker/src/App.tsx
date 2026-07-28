@@ -35,17 +35,19 @@ export const App = () => {
   }, []);
 
   if (!hasMarker) {
-    return ready ? <HomeScreen persistence={persistenceRef.current ?? undefined} /> : <div className="home" />;
+    return ready ? <HomeScreen persistence={persistenceRef.current ?? undefined} /> : <main className="home" />;
   }
 
+  // Exactly one <main> per document: the two branches are never both mounted,
+  // so the hub and the workspace can each claim it.
   return (
     <div className="marker-app">
       <TopBar persistence={persistenceRef.current ?? undefined} />
-      <div className="marker-app__middle">
+      <main className="marker-app__middle">
         <PieceTray />
         <MarkerStage />
         <RightDock />
-      </div>
+      </main>
       <BottomRibbon />
       <StatusBar />
       <CommandPalette />

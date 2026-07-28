@@ -7,9 +7,14 @@ import { drawMarkerThumbnail, type ThumbnailTokens } from './markerThumbnail';
 /**
  * One recent marker.
  *
- * The whole card opens it; the actions along the bottom do everything else.
- * They are always visible rather than revealed on hover — a hover-only action
- * is invisible on a touch screen and undiscoverable on a mouse.
+ * Three tight rows under the thumbnail, each with the same left and right
+ * anchor on every card, so a column of cards can be read straight down:
+ * name and utilisation, then the numbers, then status and recency.
+ *
+ * The actions are always visible and are drawn as buttons at rest, not as
+ * grey labels that only look clickable once the pointer is on them. A
+ * hover-only action does not exist on a touch screen and is undiscoverable
+ * on a mouse.
  */
 
 const formatWhen = (iso: string): string => {
@@ -60,6 +65,7 @@ export const MarkerCard = ({
 
   const percent = utilization(marker);
   const status = markerStatus(marker);
+  const length = markerLength(marker);
 
   const commitRename = () => {
     setRenaming(false);
@@ -78,47 +84,63 @@ export const MarkerCard = ({
         aria-label={`Open ${marker.name}`}
       >
         <canvas className="card__thumb" ref={canvasRef} aria-hidden="true" />
+        <span className="card__open-hint">Open</span>
       </button>
 
       <div className="card__body">
-        {renaming ? (
-          <input
-            ref={nameRef}
-            type="text"
-            className="card__rename"
-            value={draft}
-            aria-label="Marker name"
-            onChange={(event) => setDraft(event.target.value)}
-            onBlur={commitRename}
-            onKeyDown={(event) => {
-              event.stopPropagation();
-              if (event.key === 'Enter') commitRename();
-              if (event.key === 'Escape') {
-                setDraft(marker.name);
-                setRenaming(false);
-              }
-            }}
-          />
-        ) : (
-          <button type="button" className="card__name" onClick={onOpen} title={marker.name}>
-            {marker.name}
-          </button>
-        )}
+        <div className="card__headline">
+          {renaming ? (
+            <input
+              ref={nameRef}
+              type="text"
+              className="card__rename"
+              value={draft}
+              aria-label="Marker name"
+              onChange={(event) => setDraft(event.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(event) => {
+                event.stopPropagation();
+                if (event.key === 'Enter') commitRename();
+                if (event.key === 'Escape') {
+                  setDraft(marker.name);
+                  setRenaming(false);
+                }
+              }}
+            />
+          ) : (
+            <>
+              <button type="button" className="card__name" onClick={onOpen} title={marker.name}>
+                {marker.name}
+              </button>
+              <span
+                className="card__util"
+                data-band={utilisationBand(percent)}
+                aria-label={`Utilisation ${percent.toFixed(1)} percent`}
+              >
+                {percent.toFixed(1)}%
+              </span>
+            </>
+          )}
+        </div>
 
-        <span className="card__meta">
+        {/*
+         * Width × length, in that order, because that is how a marker is
+         * quoted on the floor. Spelled out in the tooltip, since the compact
+         * form is what fits in a 200px column.
+         */}
+        <span
+          className="card__meta"
+          title={`${marker.pieces.length} pieces · ${marker.fabricWidth} cm wide · ${length.toFixed(0)} cm long · ${consumption(marker).toFixed(2)} m per garment`}
+        >
           {marker.pieces.length} piece{marker.pieces.length === 1 ? '' : 's'} ·{' '}
-          {marker.fabricWidth} cm · {formatWhen(marker.lastOpenedAt)}
+          {marker.fabricWidth} × {length.toFixed(0)} cm · {consumption(marker).toFixed(2)} m
         </span>
 
-        <span className="card__stats">
-          <span className="card__util" data-band={utilisationBand(percent)}>
-            {percent.toFixed(1)}%
-          </span>
-          <span className="card__length">{markerLength(marker).toFixed(0)} cm</span>
-          <span className="card__consumption">{consumption(marker).toFixed(2)} m</span>
+        <span className="card__foot">
           <span className="ribbon__status" data-status={status}>
             {status}
           </span>
+          <span className="card__when">{formatWhen(marker.lastOpenedAt)}</span>
         </span>
       </div>
 
@@ -141,18 +163,26 @@ export const MarkerCard = ({
         </div>
       ) : (
         <div className="card__actions">
-          <button type="button" className="card__action" onClick={onOpen}>
-            Open
-          </button>
-          <button type="button" className="card__action" onClick={() => setRenaming(true)}>
+          <button
+            type="button"
+            className="card__action"
+            title={`Rename ${marker.name}`}
+            onClick={() => setRenaming(true)}
+          >
             Rename
           </button>
-          <button type="button" className="card__action" onClick={onDuplicate}>
+          <button
+            type="button"
+            className="card__action"
+            title={`Duplicate ${marker.name}`}
+            onClick={onDuplicate}
+          >
             Duplicate
           </button>
           <button
             type="button"
             className="card__action card__action--danger"
+            title={`Delete ${marker.name}`}
             // Deleting takes the restore points with it, so there is nothing
             // left to undo from. Ask first.
             onClick={() => setConfirming(true)}
