@@ -73,5 +73,7 @@ export {
   CONTEXT_WIDTH_DEFAULT,
 } from './uiStore';
 export type { UiState } from './uiStore';
+export { downloadDxf, downloadJson, exportFileName } from './exportCommands';
+export type { ExportOutcome } from './exportCommands';
 export { useImportStore } from './importStore';
 export type { ImportState, ImportSession, ImportSessionStatus } from './importStore';

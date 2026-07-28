@@ -47,7 +47,7 @@ export type {
   LayerUsageRow,
   LayerTreatment,
 } from './import';
-export { exportDxf, describeExportPlan } from './export';
+export { exportDxf, exportDxfWithDiagnostics, describeExportPlan, writtenConcepts, allConcepts } from './export';
 export type { ExportPlan } from './export';
 export {
   layerMapFor,

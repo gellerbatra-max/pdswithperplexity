@@ -1,6 +1,6 @@
 import { boundarySegments, findPoint, type PatternDocument, type PatternPiece } from '@/pattern';
 import { countBySeverity } from '@/diagnostics';
-import { unverifiedBindings } from './layerMapping';
+import { unverifiedBindings, type PatternConcept } from './layerMapping';
 import type { ConversionIssue, DxfExportOptions, DxfFlavour } from './types';
 
 /**
@@ -71,20 +71,63 @@ const pieceIssues = (piece: PatternPiece): ConversionIssue[] => {
   return issues;
 };
 
-/** Everything that would block or degrade an export of `document`. */
+/**
+ * Everything that would block or degrade an export of `document`.
+ *
+ * `writtenConcepts` is the set of layer bindings the writer will actually use.
+ * The layer gate is scoped to those, and deliberately so: blocking an export
+ * because `drill-hole` is unverified, when the writer emits nothing on that
+ * layer, refuses a file for a risk it does not carry. What matters is whether
+ * the concepts being *written* rest on something real.
+ *
+ * Within that set the gate has two levels, because "unverified" covers two
+ * very different states:
+ *
+ *   error    a written concept with no evidence at all — neither checked
+ *            against ASTM D6673 nor observed in a real file. Writing to a
+ *            guessed layer number puts the guess in someone else's cutting
+ *            room, which is worse than refusing.
+ *   warning  a written concept observed in real vendor files but still not
+ *            checked against the standard. That is the strongest evidence
+ *            anything in this table has; it is not certainty, and it is said
+ *            out loud on every export.
+ *
+ * Omitting `writtenConcepts` keeps the original all-or-nothing behaviour, so
+ * a caller asking "could this document export at all" still gets the strict
+ * answer.
+ */
 export const validateForExport = (
   document: PatternDocument,
   options: Pick<DxfExportOptions, 'flavour' | 'includeGradedSizes'>,
+  writtenConcepts?: readonly PatternConcept[],
 ): readonly ConversionIssue[] => {
   const issues: ConversionIssue[] = [];
 
-  // The mapping itself is unverified, which blocks any real write.
   const unverified = unverifiedBindings(options.flavour);
-  if (unverified.length > 0) {
+  const relevant =
+    writtenConcepts === undefined
+      ? unverified
+      : unverified.filter((binding) => writtenConcepts.includes(binding.concept));
+
+  const guessed = relevant.filter((binding) => (binding.observedInFixtures?.length ?? 0) === 0);
+  const observedOnly = relevant.filter((binding) => (binding.observedInFixtures?.length ?? 0) > 0);
+
+  if (guessed.length > 0) {
     issues.push({
       severity: 'error',
       code: 'unverified-layer-map',
-      message: `${unverified.length} layer binding(s) are unverified against the standard. See io/dxf/layerMapping.ts.`,
+      message: `${guessed.length} layer binding(s) this export would write to (${guessed
+        .map((b) => `${b.concept} → layer ${b.layer}`)
+        .join(', ')}) have no evidence behind them — neither checked against ASTM D6673 nor observed in a real file. See io/dxf/layerMapping.ts.`,
+    });
+  }
+  if (observedOnly.length > 0) {
+    issues.push({
+      severity: 'warning',
+      code: 'layer-map-observed-not-verified',
+      message: `${observedOnly.length} layer binding(s) this export writes to (${observedOnly
+        .map((b) => `${b.concept} → layer ${b.layer}, seen in ${b.observedInFixtures!.length} real file(s)`)
+        .join(', ')}) match real vendor files but have still not been checked against the ASTM D6673 text. That is the strongest evidence this table has; it is not the standard.`,
     });
   }
 

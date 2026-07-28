@@ -4,6 +4,8 @@ import {
   createEmptyDocument,
   createGradeRule,
   createSeedDocument,
+  downloadDxf,
+  downloadJson,
   flushAutosave,
   nextDraftGradeRuleName,
   pieceRef,
@@ -41,8 +43,9 @@ const view = () => useViewportStore.getState();
 const selection = () => useSelectionStore.getState();
 const grade = () => useGradeStore.getState();
 
-/** Mock commands report back instead of silently doing nothing. */
-const mock = (message: string) => (): void => ui().notify(message);
+// The `mock` helper that used to live here is gone: every command in this
+// registry now does the real thing. `CommandStatus` keeps its 'mock' member
+// for the next feature that lands ahead of its plumbing.
 
 /** Defer past the next React commit. A timer, not rAF, which stalls in background tabs. */
 const afterRender = (fn: () => void): void => {
@@ -351,9 +354,11 @@ const fileCommands: readonly Command[] = [
     title: 'Export PDS JSON',
     group: 'file',
     icon: 'prepare',
-    status: 'mock',
-    keywords: ['download', 'json', 'export'],
-    run: mock('Export PDS JSON — file output is not built yet'),
+    status: 'ready',
+    keywords: ['download', 'json', 'export', 'save', 'file'],
+    // The app's own format, and the only lossless one — this is what to hand
+    // someone when the geometry matters more than the recipient's CAD.
+    run: () => downloadJson(),
   },
   {
     id: 'file.import.dxf',
@@ -387,21 +392,41 @@ const fileCommands: readonly Command[] = [
   },
   {
     id: 'file.export.dxf',
-    title: 'Export DXF (AAMA)',
+    title: 'Export DXF (AAMA) — piece boundaries',
     group: 'file',
     icon: 'prepare',
-    status: 'mock',
-    keywords: ['download', 'dxf', 'aama', 'export', 'cad'],
-    /* Runs the real validator, which works today, then reports the blocker. */
+    status: 'ready',
+    keywords: ['download', 'dxf', 'aama', 'export', 'cad', 'save', 'file'],
+    /*
+     * Titled "piece boundaries" rather than plain "Export DXF" because that
+     * is what it writes: every other layer binding is unverified against
+     * ASTM D6673 and four are contradicted by real vendor files, so the
+     * writer emits the one concept three files agree on. Saying so in the
+     * command name means nobody has to read a diagnostic to find out.
+     */
+    run: () => downloadDxf(),
+  },
+  {
+    id: 'file.export.dxf.report',
+    title: 'Show what a DXF export would contain',
+    group: 'file',
+    icon: 'review',
+    status: 'ready',
+    keywords: ['dxf', 'export', 'report', 'plan', 'blockers', 'warnings'],
+    // The detail the notification cannot hold: what would be written, what
+    // would be dropped, and what is blocking.
     run: () => {
-      const plan = Dxf.describeExportPlan(doc().document, {
+      const document = doc().document;
+      const plan = Dxf.describeExportPlan(document, { flavour: 'aama', includeGradedSizes: false });
+      const { issues } = Dxf.exportDxfWithDiagnostics(document, {
+        ...Dxf.DEFAULT_EXPORT_OPTIONS,
         flavour: 'aama',
-        includeGradedSizes: false,
       });
-      const counts = Dxf.countBySeverity(plan.issues);
+      const counts = Dxf.countBySeverity(issues);
       ui().notify(
-        `${plan.label}: ${plan.blocksToWrite} pieces, ${counts.error} blocking issue(s), ` +
-          `${counts.warning} warning(s) — writer not implemented`,
+        `${plan.label}: ${plan.blocksToWrite} piece(s) over ${plan.layersUsed} verified layer binding — ` +
+          `${plan.wouldSucceed ? 'would write' : 'BLOCKED'}, ${counts.error} error(s), ${counts.warning} warning(s). ` +
+          `Notches, grain and internal lines are not written; their layer bindings are unverified.`,
       );
     },
   },

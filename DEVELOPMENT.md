@@ -40,9 +40,9 @@ intended tool sets, because there the list is the only statement of coverage.
 | DXF import | Real for what three production files prove — outlines including ones split into head-to-tail polyline chains, units from `$INSUNITS` or a `Units:` field (METRIC/IMPERIAL/ENGLISH), self-labelled `Key:Value` metadata, `LINE` kept as unclaimed construction geometry, `POINT` read as notches and turn/curve markers. Curves and drill holes: not read, warned and skipped. Grain deliberately *not* claimed. Reachable from the UI: `Import DXF (AAMA/ASTM)…` picks the file (and its `.RUL`), a review dialog shows the full account before anything replaces the open document, and the session stays inspectable via `Show last DXF import report` |
 | DXF curves | Real for `bulge`, `ARC` and `SPLINE` — exact where the model can hold the curve (bulge/ARC → arc, degree-3 four-point SPLINE → cubic), chorded to `FLATTEN_TOLERANCE_MM` and reported as approximated where it cannot. **Spec-driven, not evidence-driven**: no real apparel export on hand contains a curve entity, so its fixtures are synthetic |
 | DXF grading (`.RUL`) | Real — the companion rule table parses into `SizeRange` + `GradeRule[]` and attaches to points via the DXF's `# N` marks. Optional and non-destructive: without it the geometry imports identically |
-| DXF export | **Not implemented** — throws |
+| DXF export | **Real for the piece boundary.** Deterministic R12 ASCII; arcs survive as bulges (round-trip proven against all three real fixtures), cubics flattened to tolerance and reported. Writes only `piece-boundary` — the one binding three vendor files agree on — and reports every concept it drops. Downloads a real file from the palette, as does PDS JSON |
 | Undo/redo | Real — inverse-command stack (`historyStore.ts` + `documentCommands.ts`) |
-| Persistence | Real, partially — autosave to IndexedDB; **no file story yet** (no download/upload) |
+| Persistence | Real — autosave to IndexedDB, plus a real file story both ways: DXF/JSON download (`store/exportCommands.ts`) and DXF import via a file picker. Upload is import-only; there is no cloud sync |
 | Piece editing (name, code, fabric, qty, allowance, fold, mirror) | Real — command-driven and undoable |
 | Duplicate / remove piece | Real — command-driven and undoable |
 | Design history panel | Real — reads the command stack; undone entries shown dimmed |
@@ -136,10 +136,9 @@ to the source. It takes per-edge distances, so `PieceSegment.seamAllowance`
 overrides work. `npm run check:offset` verifies it against hand-derivable
 answers — squares, an L, a slot narrower than twice the offset, and a circle.
 
-`npm run check` runs all five self-check suites — curve, offset, round-trip,
-grading, DXF import, the DXF rule table and DXF curves, 489 assertions. They
-are not a test framework and are
-not an argument for adding one; they exist because this is the code whose
+`npm run check` runs all eight self-check suites — curve, offset, round-trip,
+grading, DXF import, DXF export, the DXF rule table and DXF curves — 555
+assertions. They are not a test framework and are not an argument for adding one; they exist because this is the code whose
 mistakes look plausible on screen and only show up in someone's cut file.
 `scripts/` carries a small Node resolver hook so the checks can import the
 app's aliased, extensionless source without a bundler or any dependency.

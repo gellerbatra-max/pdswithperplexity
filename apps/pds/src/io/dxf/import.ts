@@ -256,7 +256,10 @@ const tally = (
   entity: string,
   treatment: LayerTreatment,
 ): void => {
-  const key = `${layer} ${entity} ${treatment}`;
+  // NUL as the separator, written as an escape rather than a raw byte: a
+  // DXF layer name can contain spaces, so a printable delimiter could
+  // collide, and a raw NUL in source makes the file look binary to tools.
+  const key = `${layer}\u0000${entity}\u0000${treatment}`;
   const existing = into.get(key);
   into.set(key, {
     layer,

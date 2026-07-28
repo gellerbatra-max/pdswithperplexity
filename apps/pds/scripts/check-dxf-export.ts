@@ -1,0 +1,324 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { exportDxf, exportDxfWithDiagnostics, describeExportPlan } from '../src/io/dxf/export.ts';
+import { importDxfWithDiagnostics } from '../src/io/dxf/import.ts';
+import { arcToBulge, bulgeToArc } from '../src/io/dxf/curves.ts';
+import { segmentArcLength } from '../src/pattern/curve.ts';
+import type { PatternDocument } from '../src/pattern/index.ts';
+import { exportFileName } from '../src/store/exportCommands.ts';
+import { exportDocument, importDocument } from '../src/io/index.ts';
+
+/** The defaults the download path uses, so this suite exercises the same shape. */
+const Dxf_DEFAULTS = { unit: 'mm', includeSeamAllowance: true, includeGradedSizes: false } as const;
+
+/**
+ * Regression suite for the DXF writer.
+ *
+ * Run it with:
+ *
+ *   npm run check:export
+ *
+ * The load-bearing test here is a **round trip through the real fixtures**:
+ * import a genuine vendor file, write it back out, import that, and require
+ * the geometry to survive. That is a far stronger claim than "the output
+ * parses" — it exercises the writer against outlines the writer's author did
+ * not choose, including the self-overlapping boundaries and 41-point chained
+ * rings that real AccuMark files contain.
+ *
+ * The other property worth pinning is determinism: the same document must
+ * produce byte-identical DXF every time, or none of the above is meaningful.
+ */
+
+let failures = 0;
+const check = (name: string, ok: boolean, detail: string): void => {
+  console.log(`${ok ? 'pass' : 'FAIL'}  ${name} — ${detail}`);
+  if (!ok) failures += 1;
+};
+
+const FIXTURES = ['5109s-sp27-pattern', 'tshirt-demo-aama', '8178v-accumark'] as const;
+const load = (name: string): string =>
+  readFileSync(fileURLToPath(new URL(`./fixtures/dxf/${name}.dxf`, import.meta.url)), 'utf8');
+
+const importDoc = (text: string): PatternDocument =>
+  importDxfWithDiagnostics(text, { flavour: 'aama', assumeUnit: 'mm' }).document;
+
+const OPTIONS = { flavour: 'aama', unit: 'mm', includeSeamAllowance: false, includeGradedSizes: false } as const;
+
+/** Geometry only, ids and names aside — what a round trip must preserve. */
+const geometry = (doc: PatternDocument): string =>
+  JSON.stringify(
+    doc.pieces.map((p) => ({
+      points: p.points
+        .filter((pt) => pt.role !== 'construction')
+        .map((pt) => [pt.position.x.toFixed(6), pt.position.y.toFixed(6)]),
+      kinds: p.segments.map((s) => s.geometry.kind),
+      closed: p.closed,
+    })),
+  );
+
+/* --- 1. Determinism -------------------------------------------------------- */
+
+{
+  const doc = importDoc(load('8178v-accumark'));
+  const a = exportDxf(doc, OPTIONS);
+  const b = exportDxf(doc, OPTIONS);
+  check('the same document exports byte-identically', a === b, `${a.length} vs ${b.length} bytes`);
+  check('the output carries no timestamp or id that would defeat a diff', !/\d{4}-\d{2}-\d{2}|dxf-piece-/.test(a), 'ok');
+  check('output is CRLF-delimited group-code pairs, as DXF requires', a.endsWith('\r\n') && a.split('\r\n').length % 2 === 1, `${a.split('\r\n').length} lines`);
+  check('the output announces itself rather than posing as a CAD export', a.startsWith('999\r\nWritten by PDS'), a.slice(0, 40));
+}
+
+/* --- 2. Structure: what a reader needs to find ----------------------------- */
+
+{
+  const doc = importDoc(load('5109s-sp27-pattern'));
+  const text = exportDxf(doc, OPTIONS);
+  const has = (s: string): boolean => text.includes(`\r\n${s}\r\n`);
+  check('a HEADER section is written', has('HEADER'), 'ok');
+  check('$INSUNITS is written', text.includes('$INSUNITS'), 'ok');
+  check('a BLOCKS section is written', has('BLOCKS'), 'ok');
+  check('an ENTITIES section is written', has('ENTITIES'), 'ok');
+  check('the file terminates with EOF', text.trimEnd().endsWith('EOF'), 'ok');
+
+  const count = (marker: string): number => text.split(`\r\n0\r\n${marker}\r\n`).length - 1;
+  check('one BLOCK per piece', count('BLOCK') === doc.pieces.length, `${count('BLOCK')} vs ${doc.pieces.length}`);
+  check('one INSERT per piece', count('INSERT') === doc.pieces.length, `${count('INSERT')} vs ${doc.pieces.length}`);
+  check('one POLYLINE per piece', count('POLYLINE') === doc.pieces.length, `${count('POLYLINE')} vs ${doc.pieces.length}`);
+  check('every POLYLINE is closed with SEQEND', count('SEQEND') === count('POLYLINE'), `${count('SEQEND')} vs ${count('POLYLINE')}`);
+}
+
+/* --- 3. Round trip through every real fixture ------------------------------ */
+
+for (const name of FIXTURES) {
+  const original = importDoc(load(name));
+  const written = exportDxf(original, OPTIONS);
+  const reimported = importDxfWithDiagnostics(written, { flavour: 'aama', assumeUnit: 'mm' });
+
+  check(`${name}: the written file imports without error`, !reimported.issues.some((i) => i.severity === 'error'), reimported.issues.filter((i) => i.severity === 'error').map((i) => i.code).join(', ') || 'no errors');
+  check(`${name}: every piece survives the round trip`, reimported.document.pieces.length === original.pieces.length, `${reimported.document.pieces.length} vs ${original.pieces.length}`);
+  check(
+    `${name}: the geometry survives the round trip exactly`,
+    geometry(reimported.document) === geometry(original),
+    geometry(reimported.document) === geometry(original) ? 'identical' : 'DIFFERS',
+  );
+  check(
+    `${name}: piece names survive, via the block name`,
+    reimported.document.pieces.every((p, i) => p.meta.code === (original.pieces[i]!.meta.code || original.pieces[i]!.name)),
+    'ok',
+  );
+
+  // Exporting the re-imported document must reproduce the same bytes. This is
+  // the fixed point: if it holds, the writer is not drifting on each cycle.
+  check(
+    `${name}: a second export/import cycle is a fixed point`,
+    exportDxf(reimported.document, OPTIONS) === written,
+    'stable',
+  );
+}
+
+/* --- 4. Arcs survive exactly; cubics are flattened and said so ------------- */
+
+{
+  // arcToBulge is the inverse of bulgeToArc — checked directly, both ways.
+  const A = { x: 0, y: 0 };
+  const B = { x: 100, y: 0 };
+  for (const bulge of [0.1, 0.5, 1, -0.5, 2]) {
+    const arc = bulgeToArc(A, B, bulge);
+    const back = arcToBulge(A, B, arc);
+    check(`bulge ${bulge} survives arc → bulge → arc`, Math.abs(back - bulge) < 1e-9, `${back.toFixed(12)} vs ${bulge}`);
+  }
+  check('a straight segment has no bulge', arcToBulge(A, B, { kind: 'line' }) === 0, 'ok');
+
+  const arcDoc = importDoc(load('synthetic-curves-bulge'));
+  const written = exportDxf(arcDoc, OPTIONS);
+  check('an arc is written as a bulge, not flattened', written.includes('\r\n42\r\n'), 'ok');
+
+  const back = importDxfWithDiagnostics(written, { flavour: 'aama', assumeUnit: 'mm' }).document;
+  const arcOf = (d: PatternDocument) => d.pieces[0]!.segments.find((s) => s.geometry.kind === 'arc')!;
+  check('the arc comes back as an arc, not a chord chain', back.pieces[0]!.segments.filter((s) => s.geometry.kind === 'arc').length === 1, JSON.stringify(back.pieces[0]!.segments.map((s) => s.geometry.kind)));
+  {
+    const before = arcOf(arcDoc);
+    const after = arcOf(back);
+    const p = (d: PatternDocument, id: string) => d.pieces[0]!.points.find((x) => x.id === id)!.position;
+    check(
+      'and with the same radius, handedness and arc length',
+      JSON.stringify(after.geometry) === JSON.stringify(before.geometry) &&
+        Math.abs(
+          segmentArcLength(p(back, after.from), p(back, after.to), after.geometry) -
+            segmentArcLength(p(arcDoc, before.from), p(arcDoc, before.to), before.geometry),
+        ) < 1e-9,
+      `${JSON.stringify(after.geometry)} vs ${JSON.stringify(before.geometry)}`,
+    );
+  }
+
+  const cubicDoc = importDoc(load('synthetic-curves-spline-cubic'));
+  const cubicOut = exportDxfWithDiagnostics(cubicDoc, OPTIONS);
+  check(
+    'a cubic is flattened and reported, not silently chorded',
+    cubicOut.issues.some((i) => i.code === 'export-cubic-flattened' && i.message.includes('0.1mm')),
+    cubicOut.issues.find((i) => i.code === 'export-cubic-flattened')?.message ?? 'missing',
+  );
+}
+
+/* --- 5. Honesty: what is not written, and why ------------------------------ */
+
+{
+  const doc = importDoc(load('8178v-accumark'));
+  const result = exportDxfWithDiagnostics(doc, OPTIONS);
+
+  check(
+    'concepts the writer drops are reported per piece, not silently stripped',
+    result.issues.some((i) => i.code === 'export-concept-not-written' && i.message.includes('notch')),
+    result.issues.find((i) => i.code === 'export-concept-not-written')?.message ?? 'missing',
+  );
+  check(
+    'the unverified layer table is surfaced on every export, as a warning naming the evidence',
+    result.issues.some(
+      (i) => i.code === 'layer-map-observed-not-verified' && i.message.includes('piece-boundary') && i.message.includes('real file'),
+    ),
+    result.issues.find((i) => i.code === 'layer-map-observed-not-verified')?.message ?? 'missing',
+  );
+  check(
+    'the gate is scoped to what is written — unwritten bindings do not block',
+    !result.issues.some((i) => i.code === 'unverified-layer-map' && i.severity === 'error'),
+    'ok',
+  );
+
+  const withExtras = exportDxfWithDiagnostics(doc, { ...OPTIONS, includeSeamAllowance: true, includeGradedSizes: true });
+  check('requesting seam allowance is refused explicitly, not ignored', withExtras.issues.some((i) => i.code === 'export-seam-allowance-not-written'), 'ok');
+  check('requesting graded sizes is refused explicitly, not ignored', withExtras.issues.some((i) => i.code === 'export-graded-sizes-not-written'), 'ok');
+  check(
+    'and neither request changes the bytes written',
+    exportDxf(doc, { ...OPTIONS, includeSeamAllowance: true }) === exportDxf(doc, OPTIONS),
+    'ok',
+  );
+}
+
+/* --- 6. Refusal beats a knowingly broken file ------------------------------ */
+
+{
+  const doc = importDoc(load('5109s-sp27-pattern'));
+  const empty: PatternDocument = { ...doc, pieces: [] };
+  let threw = false;
+  try {
+    exportDxf(empty, OPTIONS);
+  } catch {
+    threw = true;
+  }
+  check('a document with no pieces is refused rather than written empty', threw, String(threw));
+
+  const plan = describeExportPlan(doc, { flavour: 'aama', includeGradedSizes: false });
+  check('describeExportPlan now reports that an export would succeed', plan.wouldSucceed, String(plan.wouldSucceed));
+  check('…and counts only the bindings the writer actually uses', plan.layersUsed === 1, String(plan.layersUsed));
+  check('describeExportPlan agrees with the writer about blocking', plan.wouldSucceed === !exportDxfWithDiagnostics(doc, OPTIONS).issues.some((i) => i.severity === 'error'), 'ok');
+}
+
+/* --- 7. Units -------------------------------------------------------------- */
+
+{
+  const doc = importDoc(load('5109s-sp27-pattern'));
+  const mm = exportDxf(doc, OPTIONS);
+  const inches = exportDxf(doc, { ...OPTIONS, unit: 'in' });
+  check('the requested unit reaches $INSUNITS', mm.includes('$INSUNITS\r\n70\r\n4') && inches.includes('$INSUNITS\r\n70\r\n1'), 'ok');
+  check('and the coordinates are converted to match, not just relabelled', mm !== inches, 'ok');
+
+  // An inch file must re-import to the same millimetre geometry.
+  const back = importDxfWithDiagnostics(inches, { flavour: 'aama', assumeUnit: 'mm' }).document;
+  check('an inch export round-trips back to the same millimetre geometry', geometry(back) === geometry(doc), geometry(back) === geometry(doc) ? 'identical' : 'DIFFERS');
+}
+
+/* --- 8. The download path ---------------------------------------------------
+ *
+ * `saveTextFile` itself needs a DOM and is verified in the browser; what is
+ * checked here is everything around it — the filename rule, and the property
+ * that matters most: the download layer must not touch the bytes. It hands
+ * the writer's output over unchanged or it is not a download path, it is a
+ * second, untested writer.
+ */
+
+{
+  const doc = importDoc(load('8178v-accumark'));
+
+  // Byte identity: what the download would carry is what the writer wrote.
+  // `downloadDxf` cannot run headless (it needs a DOM), so this asserts the
+  // one thing that could silently diverge — the serialisation it hands over.
+  const direct = exportDxf(doc, { ...Dxf_DEFAULTS, flavour: 'aama' });
+  const viaDiagnostics = exportDxfWithDiagnostics(doc, { ...Dxf_DEFAULTS, flavour: 'aama' }).text;
+  check(
+    'the bytes the download path carries are the writer\'s, unchanged',
+    direct === viaDiagnostics,
+    `${direct.length} vs ${viaDiagnostics.length} bytes`,
+  );
+  check(
+    'and are unchanged from before the download layer existed',
+    direct === exportDxf(doc, OPTIONS),
+    'identical',
+  );
+
+  /* --- Filenames ---------------------------------------------------------- */
+
+  const named = (code: string, name: string): PatternDocument => ({
+    ...doc,
+    name,
+    style: { ...doc.style, code },
+  });
+
+  check('the style code becomes the filename', exportFileName(named('8178V', 'Anything'), '.dxf') === '8178V.dxf', exportFileName(named('8178V', 'Anything'), '.dxf'));
+  check('the document name is the fallback when there is no code', exportFileName(named('', 'Classic Shirt'), '.dxf') === 'Classic-Shirt.dxf', exportFileName(named('', 'Classic Shirt'), '.dxf'));
+  check('an empty document still gets a name', exportFileName(named('', ''), '.dxf') === 'pattern.dxf', exportFileName(named('', ''), '.dxf'));
+  check(
+    'path separators and wildcards cannot escape into the filename',
+    exportFileName(named('a/b\\c:d*e?f"g<h>i|j', ''), '.dxf') === 'a-b-c-d-e-f-g-h-i-j.dxf',
+    exportFileName(named('a/b\\c:d*e?f"g<h>i|j', ''), '.dxf'),
+  );
+  check(
+    'separator runs collapse rather than producing a row of dashes',
+    exportFileName(named('8178V  -  SP27', ''), '.dxf') === '8178V-SP27.dxf',
+    exportFileName(named('8178V  -  SP27', ''), '.dxf'),
+  );
+  check(
+    'a leading dot cannot make the export a hidden file',
+    !exportFileName(named('.hidden', ''), '.dxf').startsWith('.'),
+    exportFileName(named('.hidden', ''), '.dxf'),
+  );
+  check(
+    'trailing dots and spaces are stripped, which Windows would do silently',
+    exportFileName(named('style. ', ''), '.dxf') === 'style.dxf',
+    exportFileName(named('style. ', ''), '.dxf'),
+  );
+  check(
+    'a control character in a name cannot reach the filename',
+    exportFileName(named('bad\nname\there', ''), '.dxf') === 'bad-name-here.dxf',
+    JSON.stringify(exportFileName(named('bad\nname\there', ''), '.dxf')),
+  );
+  check(
+    'a Windows reserved name is escaped rather than failing to save',
+    exportFileName(named('CON', ''), '.dxf') === 'CON-pattern.dxf',
+    exportFileName(named('CON', ''), '.dxf'),
+  );
+  check(
+    'an absurdly long code is truncated to something a filesystem will take',
+    exportFileName(named('X'.repeat(500), ''), '.dxf').length <= 90,
+    String(exportFileName(named('X'.repeat(500), ''), '.dxf').length),
+  );
+  check(
+    'the extension is whatever the caller asked for, so JSON reuses this',
+    exportFileName(named('8178V', ''), '.pds.json') === '8178V.pds.json',
+    exportFileName(named('8178V', ''), '.pds.json'),
+  );
+  check(
+    'the same document always produces the same filename',
+    exportFileName(doc, '.dxf') === exportFileName(doc, '.dxf') && !/\d{4}-\d{2}-\d{2}|\(\d+\)/.test(exportFileName(doc, '.dxf')),
+    exportFileName(doc, '.dxf'),
+  );
+
+  // The JSON export reuses the same path, and that format is lossless.
+  {
+    const json = exportDocument(doc, 'pds-json');
+    const back = importDocument(json, 'pds-json');
+    check('the JSON export round-trips losslessly, unlike DXF', JSON.stringify(back) === JSON.stringify(doc), 'ok');
+  }
+}
+
+console.log(failures === 0 ? '\nAll DXF export checks passed.' : `\n${failures} DXF export check(s) FAILED.`);
+process.exit(failures === 0 ? 0 : 1);

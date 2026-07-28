@@ -1,5 +1,5 @@
 import type { Vec2 } from '@/geometry';
-import { FLATTEN_TOLERANCE_MM, LINE, type SegmentGeometry } from '@/pattern';
+import { FLATTEN_TOLERANCE_MM, LINE, resolveArc, type SegmentGeometry } from '@/pattern';
 
 /**
  * DXF curve entities → this app's `SegmentGeometry`.
@@ -80,6 +80,34 @@ export const bulgeToArc = (from: Vec2, to: Vec2, bulge: number): SegmentGeometry
     // this is called the sign already means what this frame says it means.
     clockwise: theta < 0,
   };
+};
+
+/**
+ * Arc → bulge: the exact inverse of `bulgeToArc`, for the writer.
+ *
+ * `resolveArc` gives the centre form including the *signed* sweep, so nothing
+ * is approximated in either direction. That is what lets a bulge survive a
+ * full import → export → import cycle unchanged — the strongest round-trip
+ * property this pair of modules has.
+ *
+ * The sign needs care, and the reason is the same frame difference the Y-flip
+ * embodies. `arcCentre` measures its sweep in this app's y-down space, where a
+ * *clockwise* arc has a **positive** sweep (see the sign loop at the end of
+ * `arcCentre`). A DXF bulge measures the included angle in the file's y-up
+ * space, where counter-clockwise is positive. So `sweep = -theta`, and the
+ * bulge is `-tan(sweep / 4)`. Dropping the negation leaves every radius,
+ * chord and arc length correct and silently mirrors the curve — the exact
+ * class of bug the importer's own handedness fix was about.
+ *
+ * Returns 0 — a straight segment — for anything that is not an arc, and for a
+ * degenerate arc whose centre cannot be resolved, matching what `bulgeToArc`
+ * does at the same boundary.
+ */
+export const arcToBulge = (from: Vec2, to: Vec2, geometry: SegmentGeometry): number => {
+  if (geometry.kind !== 'arc') return 0;
+  const centre = resolveArc(from, to, geometry);
+  if (!centre) return 0;
+  return -Math.tan(centre.sweep / 4);
 };
 
 /* --- ARC entity ------------------------------------------------------------ *

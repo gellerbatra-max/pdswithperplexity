@@ -19,7 +19,7 @@ io/
     ├── curves.ts        bulge / ARC / SPLINE → SegmentGeometry (spec-driven)
     ├── ruleTable.ts     Companion .RUL grade rule table → SizeRange/GradeRule
     ├── import.ts        Parser + topology rebuild — real; see scope below
-    ├── export.ts        Writer (not implemented) + describeExportPlan
+    ├── export.ts        Writer — piece boundaries, real; + describeExportPlan
     └── validation.ts    Pre-flight checks — implemented, both directions
 ```
 
@@ -36,7 +36,7 @@ io/
 | DXF import (tokenizer, BLOCK/INSERT resolution, topology rebuild) | **Real**, scoped to what three real fixtures prove: boundary polylines including outlines split into head-to-tail chains, units from `$INSUNITS` / `Units:` (METRIC, IMPERIAL, ENGLISH), self-labelled `Key:Value` metadata, LINE kept as unclaimed construction geometry, and POINT entities read as notches and turn/curve markers |
 | Companion `.RUL` grade rule table | **Real** — parsed into `SizeRange` + `GradeRule[]`, attached to points via the DXF's `# N` marks. Optional: absent, the geometry imports identically |
 | DXF curve entities | **Real, but spec-driven rather than evidence-driven** — bulge and `ARC` reconstruct exactly, a degree-3 four-point `SPLINE` becomes an exact cubic, any other `SPLINE` is chorded to `FLATTEN_TOLERANCE_MM` and reported as approximated. Fixtures are synthetic; see below |
-| DXF writer | **Not implemented** — throws |
+| DXF writer | **Real, for the piece boundary only.** R12 ASCII: HEADER/`$INSUNITS`, one BLOCK + POLYLINE per piece, one INSERT each. Arcs written as vertex bulges (exact, round-trip proven); cubics flattened to `FLATTEN_TOLERANCE_MM` and reported. Deterministic — byte-identical for the same document. Every concept it declines to write is reported per piece |
 
 ### The three fixtures, and what each one broke
 
@@ -142,6 +142,32 @@ points was rejected as degenerate, which is right for chords and wrong the
 moment a curve is involved — two points joined by a curve enclose area (a
 lens; a circle written as two semicircular arcs). Fixed, and regression-tested.
 
+### The writer writes one layer, and says why
+
+`layerMapping.ts` holds twelve bindings, none verified against ASTM D6673: six
+have real-file evidence, four are *contradicted* by a real file, two are
+untested. Import can afford to read a contradicted layer and warn. Export
+cannot — a wrong layer number leaves the mistake in someone else's cutting
+room, and there is no diagnostic there to read it.
+
+So the writer emits exactly one concept: `piece-boundary`, layer 1 — the only
+binding with three independent vendor files agreeing on both the number and
+the entity kind. Notches, grain, internal lines, construction points and
+annotation are **not written**, and each is reported per piece
+(`export-concept-not-written`) rather than a piece arriving silently stripped.
+`includeSeamAllowance` and `includeGradedSizes` are refused the same way,
+naming the contradicted binding that blocks each.
+
+`validateForExport` now takes the set of concepts a write will actually use,
+and the gate is scoped to those with two levels: a written concept with *no*
+evidence is an error, a written concept observed in real files but unverified
+against the standard is a warning on every export. Blocking a boundary export
+because `drill-hole` is unverified would refuse a file for a risk it does not
+carry.
+
+Widening this is a data problem, not a code one — verify a binding, and the
+concept it names is a few lines away.
+
 ## Why layer mapping is the centre of it
 
 Apparel DXF — AAMA's convention and the ASTM D6673 standard that grew from it —
@@ -241,9 +267,17 @@ apply; `Show last DXF import report` reopens it. The dialog renders from
 `DxfImportResult.layers`, the structured per-layer account the importer
 returns, not from re-parsing diagnostic strings.
 
-**Export is still `mock`**: it has no writer. The palette command runs the
-real validator against the open document and reports the blockers rather
-than doing anything.
+**Export downloads a real file.** `Export DXF (AAMA) — piece boundaries`
+writes the document and hands it to the browser as a download;
+`Export PDS JSON` does the same through the app's own lossless format. Both
+go through `store/exportCommands.ts`, which is where the one bit of download
+DOM lives — `io/` stays pure so the Node check scripts can import it. The
+filename is deterministic (style code, else document name, sanitised), so a
+second export overwrites the first instead of accumulating `style (3).dxf`.
+`Show what a DXF export would contain` reports the plan without writing.
+
+A DXF export refuses exactly when the writer refuses; it does not
+re-implement the gate, it asks it.
 
 Two commands exercise the importer from the terminal:
 
