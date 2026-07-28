@@ -4,6 +4,8 @@ import {
   findPoint,
   flattenSegment,
   FLATTEN_TOLERANCE_MM,
+  pointOnSegment,
+  type Notch,
   type PatternDocument,
   type PatternPiece,
 } from '@/pattern';
@@ -30,12 +32,27 @@ import { DXF_FLAVOUR_LABEL } from './types';
  * *disagree* about — and unlike a bad import, a bad export leaves the mistake
  * in someone else's cutting room.
  *
- * So this writes exactly one concept: `piece-boundary`, layer 1. That is the
- * one binding with three independent vendor files agreeing on both the number
- * and the entity kind — the strongest evidence anything here has. Every other
- * concept the model holds (notches, grain, internal lines, construction
- * points, annotation) is deliberately **not written**, and `exportDxf` reports
- * each one it dropped rather than letting a piece arrive silently stripped.
+ * So this writes the two concepts real files actually evidence:
+ *
+ *   piece-boundary  layer 1, POLYLINE. Three independent vendor files agree
+ *                   on the number and the entity kind.
+ *   notch           layer 4, POINT. One vendor file, but confirmed by
+ *                   *geometry* rather than by entity kind alone — its layer-4
+ *                   points land exactly on the outline, which is what a notch
+ *                   is.
+ *
+ * Neither is `verified: true`; that flag means "checked against the ASTM
+ * D6673 text", which has not happened for any binding. Both therefore warn on
+ * every export. Every other concept the model holds (grain, internal lines,
+ * construction points, annotation) is deliberately **not written**, and
+ * `exportDxf` reports each one it dropped rather than letting a piece arrive
+ * silently stripped.
+ *
+ * A notch's *position* is written and its *shape* is not. A real file pairs
+ * each on-seam point with a second one 7mm inside — plausibly the depth — but
+ * the importer declines to read that pairing as depth because the file never
+ * says so, and emitting one here would be inventing the convention we refused
+ * to infer.
  *
  * Widening this is a data problem, not a code one: verify a binding against
  * the standard, and the concept it names can be added here in a few lines.
@@ -69,7 +86,7 @@ const COORD_DECIMALS = 6;
  * Concepts this writer emits. Deliberately one: see the module note. Anything
  * the document holds outside this set is reported as dropped.
  */
-const WRITTEN_CONCEPTS: readonly PatternConcept[] = ['piece-boundary'];
+const WRITTEN_CONCEPTS: readonly PatternConcept[] = ['piece-boundary', 'notch'];
 
 const number = (value: number): string => {
   // `toFixed` then strip trailing zeros: stable across platforms, and free of
@@ -92,6 +109,7 @@ interface WriteContext {
   /** Millimetres per output unit — geometry is held in mm and divided by this. */
   readonly perUnit: number;
   readonly boundaryLayer: string;
+  readonly notchLayer: string;
   readonly issues: ConversionIssue[];
 }
 
@@ -147,10 +165,97 @@ const boundaryVertices = (
   return out;
 };
 
+/**
+ * A notch's position on the seam, resolved from the (segment, t) the model
+ * stores — the exact inverse of how the importer reads one.
+ *
+ * The importer takes a layer-4 POINT that lands *on* the outline and projects
+ * it to the nearest boundary segment; this evaluates that parameter back to a
+ * coordinate. Going through `pointOnSegment` rather than interpolating the
+ * chord is what keeps a notch on a curved seam where it belongs: on an arc the
+ * two answers differ by the sagitta, which on a real armhole is millimetres.
+ *
+ * Returns null when the notch names a segment the piece no longer has, which
+ * `validateForExport` would already have errored on — a guard, not a path.
+ */
+const notchPosition = (piece: PatternPiece, notch: Notch): Vec2 | null => {
+  const segment = piece.segments.find((s) => s.id === notch.segmentId);
+  if (!segment) return null;
+  const from = findPoint(piece, segment.from);
+  const to = findPoint(piece, segment.to);
+  if (!from || !to) return null;
+  return pointOnSegment(from.position, to.position, segment.geometry, notch.t);
+};
+
+/**
+ * Notches as POINT entities on the notch layer.
+ *
+ * One point per notch, on the seam, and nothing else. A real file pairs each
+ * on-seam point with a second one 7mm inside — plausibly the depth — but the
+ * importer deliberately declines to read that pairing as depth because the
+ * file never says so, and writing one here would be inventing the convention
+ * we refused to infer. So the position is exported (which is what a layer-4
+ * point is known to mean) and the notch's shape is not.
+ *
+ * Written in seam order rather than array order: a reader walking the file
+ * meets them the way they sit on the piece, and the output stays stable if
+ * two documents hold the same notches in a different order.
+ */
+const writeNotches = (
+  piece: PatternPiece,
+  context: WriteContext,
+): readonly (readonly [string, string])[] => {
+  const layer = context.notchLayer;
+  const toFile = (p: Vec2): Vec2 => ({ x: p.x / context.perUnit, y: -p.y / context.perUnit });
+
+  const placed: { readonly order: number; readonly at: Vec2 }[] = [];
+  let unresolved = 0;
+  for (const notch of piece.notches) {
+    const at = notchPosition(piece, notch);
+    if (!at) {
+      unresolved += 1;
+      continue;
+    }
+    const index = piece.boundary.indexOf(notch.segmentId);
+    placed.push({ order: (index < 0 ? piece.boundary.length : index) + notch.t, at });
+  }
+  placed.sort((a, b) => a.order - b.order);
+
+  if (unresolved > 0) {
+    context.issues.push({
+      severity: 'error',
+      code: 'export-notch-unresolved',
+      message: `"${piece.name}": ${unresolved} notch(es) name a boundary segment this piece does not have, so their position cannot be resolved. Refusing rather than writing a notch at a guessed coordinate.`,
+      pieceId: piece.id,
+    });
+  }
+
+  // Kind, depth, width and angle have no representation in a bare POINT, and
+  // no real file has shown what a shaped notch looks like on this layer. Say
+  // what is being lost, once per piece, rather than per notch.
+  if (placed.length > 0) {
+    const shapes = [...new Set(piece.notches.map((n) => n.kind))].join('/');
+    context.issues.push({
+      severity: 'warning',
+      code: 'export-notch-shape-not-written',
+      message: `"${piece.name}": ${placed.length} notch position(s) written on layer "${layer}", but their shape was not — kind (${shapes}), depth, width and angle have no representation in a POINT, and no real file has shown how this profile encodes a shaped notch. A reader will find where each notch goes, not what it looks like.`,
+      pieceId: piece.id,
+    });
+  }
+
+  const rows: (readonly [string, string])[] = [];
+  for (const { at } of placed) {
+    const file = toFile(at);
+    rows.push(pair(0, 'POINT'), pair(8, layer), pair(10, file.x), pair(20, file.y), pair(30, 0));
+  }
+  return rows;
+};
+
 /** Everything the model holds for this piece that the writer will not emit. */
 const reportDroppedConcepts = (piece: PatternPiece, issues: ConversionIssue[]): void => {
+  // Notches are written now (see `writeNotches`); only their shape is not,
+  // and that is reported separately rather than listed as a dropped concept.
   const dropped: string[] = [];
-  if (piece.notches.length > 0) dropped.push(`${piece.notches.length} notch(es)`);
   if (piece.internalLines.length > 0) dropped.push(`${piece.internalLines.length} internal line(s)`);
   if (piece.grainLine) dropped.push('a grain line');
   const construction = piece.points.filter((p) => p.role === 'construction').length;
@@ -160,7 +265,7 @@ const reportDroppedConcepts = (piece: PatternPiece, issues: ConversionIssue[]): 
   issues.push({
     severity: 'warning',
     code: 'export-concept-not-written',
-    message: `"${piece.name}": ${dropped.join(', ')} were not written. This writer emits the piece boundary only — every other layer binding is unverified against ASTM D6673, and two vendor files already contradict the table, so writing to those numbers would put the guess in someone else's cutting room. The exported outline is complete and correct; it is just an outline.`,
+    message: `"${piece.name}": ${dropped.join(', ')} were not written. This writer emits piece boundaries and notch positions — the two bindings real vendor files actually evidence. The rest are unverified against ASTM D6673 and four are contradicted outright, so writing to those numbers would put the guess in someone else's cutting room.`,
     pieceId: piece.id,
   });
 };
@@ -198,6 +303,9 @@ const writeBlock = (piece: PatternPiece, context: WriteContext): readonly (reado
     if (vertex.bulge !== 0) rows.push(pair(42, vertex.bulge));
   }
   rows.push(pair(0, 'SEQEND'), pair(8, context.boundaryLayer));
+  // After the outline, so a reader has the seam before the marks on it — and
+  // so the boundary bytes are unchanged for a piece that carries no notches.
+  rows.push(...writeNotches(piece, context));
   rows.push(pair(0, 'ENDBLK'), pair(8, '0'));
   return rows;
 };
@@ -234,6 +342,7 @@ export const exportDxfWithDiagnostics = (
   const context: WriteContext = {
     perUnit: toMillimetres(1, options.unit),
     boundaryLayer,
+    notchLayer: String(layerForConcept('notch', options.flavour) ?? 4),
     issues,
   };
 
@@ -257,7 +366,7 @@ export const exportDxfWithDiagnostics = (
     // multi-byte character in a file this writer controls is a guess about
     // how the reader will decode it. Piece names are data and are written as
     // they are; this line is ours.
-    pair(999, 'Written by PDS. Piece boundaries only - see export-concept-not-written diagnostics.'),
+    pair(999, 'Written by PDS. Piece boundaries and notch positions - see diagnostics.'),
     pair(0, 'SECTION'),
     pair(2, 'HEADER'),
     pair(9, '$ACADVER'),

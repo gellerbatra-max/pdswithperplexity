@@ -7,6 +7,8 @@ import { segmentArcLength } from '../src/pattern/curve.ts';
 import type { PatternDocument } from '../src/pattern/index.ts';
 import { exportFileName } from '../src/store/exportCommands.ts';
 import { exportDocument, importDocument } from '../src/io/index.ts';
+import { layerForConcept } from '../src/io/dxf/layerMapping.ts';
+import { pointOnSegment } from '../src/pattern/curve.ts';
 
 /** The defaults the download path uses, so this suite exercises the same shape. */
 const Dxf_DEFAULTS = { unit: 'mm', includeSeamAllowance: true, includeGradedSizes: false } as const;
@@ -168,7 +170,9 @@ for (const name of FIXTURES) {
 
   check(
     'concepts the writer drops are reported per piece, not silently stripped',
-    result.issues.some((i) => i.code === 'export-concept-not-written' && i.message.includes('notch')),
+    result.issues.some(
+      (i) => i.code === 'export-concept-not-written' && i.message.includes('internal line'),
+    ),
     result.issues.find((i) => i.code === 'export-concept-not-written')?.message ?? 'missing',
   );
   check(
@@ -209,7 +213,11 @@ for (const name of FIXTURES) {
 
   const plan = describeExportPlan(doc, { flavour: 'aama', includeGradedSizes: false });
   check('describeExportPlan now reports that an export would succeed', plan.wouldSucceed, String(plan.wouldSucceed));
-  check('…and counts only the bindings the writer actually uses', plan.layersUsed === 1, String(plan.layersUsed));
+  check(
+    '…and counts only the bindings the writer actually uses — boundary and notch',
+    plan.layersUsed === 2,
+    String(plan.layersUsed),
+  );
   check('describeExportPlan agrees with the writer about blocking', plan.wouldSucceed === !exportDxfWithDiagnostics(doc, OPTIONS).issues.some((i) => i.severity === 'error'), 'ok');
 }
 
@@ -318,6 +326,144 @@ for (const name of FIXTURES) {
     const back = importDocument(json, 'pds-json');
     check('the JSON export round-trips losslessly, unlike DXF', JSON.stringify(back) === JSON.stringify(doc), 'ok');
   }
+}
+
+/* --- 9. Notches on the notch layer ------------------------------------------
+ *
+ * The second concept the writer emits, and the second binding with real-file
+ * evidence behind it: layer-4 POINTs in the AccuMark fixture land exactly on
+ * the outline, which is what a notch is. (Evidence, not verification — the
+ * binding is still `verified: false`, so it warns on every export like
+ * `piece-boundary` does.)
+ *
+ * The position is written; the *shape* is not. A real file pairs each on-seam
+ * point with a second one 7mm inside, plausibly the depth, and the importer
+ * declines to read that as depth because the file never says so. Writing one
+ * would be inventing the convention we refused to infer.
+ */
+
+{
+  const withNotches = importDoc(load('8178v-accumark'));
+  const withoutNotches = importDoc(load('5109s-sp27-pattern'));
+
+  const notchCount = withNotches.pieces.reduce((n, p) => n + p.notches.length, 0);
+  check('the notch fixture has notches to export', notchCount === 3, `${notchCount}`);
+  check('the boundary-only fixture has none', withoutNotches.pieces.every((p) => p.notches.length === 0), 'ok');
+
+  const text = exportDxf(withNotches, OPTIONS);
+  const plain = exportDxf(withoutNotches, OPTIONS);
+  const countPoints = (t: string): number => (t.match(/\r\n0\r\nPOINT\r\n/g) ?? []).length;
+
+  check('one POINT is written per notch', countPoints(text) === notchCount, `${countPoints(text)} vs ${notchCount}`);
+  check('a piece with no notches gets no POINT at all', countPoints(plain) === 0, `${countPoints(plain)}`);
+
+  {
+    // Every POINT must sit on layer 4 — the notch binding's number, taken
+    // from the layer table rather than hardcoded here.
+    const notchLayer = String(layerForConcept('notch', 'aama'));
+    check('the notch layer comes from the layer table, and is 4', notchLayer === '4', notchLayer);
+    const pointBlocks = text.split('\r\n0\r\nPOINT\r\n').slice(1);
+    check(
+      'every notch POINT is written on the notch layer, not the boundary layer',
+      pointBlocks.length === notchCount && pointBlocks.every((b) => b.startsWith(`8\r\n${notchLayer}\r\n`)),
+      pointBlocks.map((b) => b.slice(0, 6).replace(/\r\n/g, '|')).join(' '),
+    );
+  }
+
+  /* --- The boundary is untouched ----------------------------------------- */
+
+  // The claim that matters most: adding notches changed nothing about how a
+  // boundary is written. Compared on the file body, since the header comment
+  // legitimately changed to describe the new capability.
+  const body = (t: string): string => t.slice(t.indexOf('0\r\nSECTION'));
+  check(
+    'a notch-free document exports a byte-identical body to a boundary-only writer',
+    // 3364 bytes / sha 56e061d3fbb37e5b before notch export existed, measured
+    // directly against the previous commit rather than asserted.
+    body(plain).length === 3364,
+    `${body(plain).length} bytes`,
+  );
+  check(
+    'the POLYLINE section of a notched piece is unchanged by its notches',
+    (() => {
+      const upToSeqend = body(text).slice(0, body(text).indexOf('\r\n0\r\nPOINT\r\n'));
+      return upToSeqend.includes('SEQEND') && !upToSeqend.includes('\r\n0\r\nPOINT\r\n');
+    })(),
+    'notches follow the outline, never interleave with it',
+  );
+
+  /* --- Round trip --------------------------------------------------------- */
+
+  const back = importDxfWithDiagnostics(text, { flavour: 'aama', assumeUnit: 'mm' });
+  const backCount = back.document.pieces.reduce((n, p) => n + p.notches.length, 0);
+  check('exported notches come back as notches, not stray points', backCount === notchCount, `${backCount} vs ${notchCount}`);
+  check('and the geometry still round-trips exactly alongside them', geometry(back.document) === geometry(withNotches), geometry(back.document) === geometry(withNotches) ? 'identical' : 'DIFFERS');
+  {
+    // Position is what survives: same segment, same parameter. Compared by
+    // resolved coordinate, since segment ids are re-minted on each import.
+    const at = (d: PatternDocument): string =>
+      JSON.stringify(
+        d.pieces.flatMap((p) =>
+          p.notches.map((n) => {
+            const seg = p.segments.find((s) => s.id === n.segmentId)!;
+            const f = p.points.find((x) => x.id === seg.from)!.position;
+            const t = p.points.find((x) => x.id === seg.to)!.position;
+            const pt = pointOnSegment(f, t, seg.geometry, n.t);
+            return [pt.x.toFixed(6), pt.y.toFixed(6)];
+          }),
+        ).sort(),
+      );
+    check('each notch returns to the same point on the seam', at(back.document) === at(withNotches), at(back.document) === at(withNotches) ? 'identical' : `${at(back.document)} vs ${at(withNotches)}`);
+  }
+
+  /* --- What is not written, said out loud --------------------------------- */
+
+  const result = exportDxfWithDiagnostics(withNotches, OPTIONS);
+  check(
+    'notch shape is reported as not written, naming what is lost',
+    result.issues.some(
+      (i) =>
+        i.code === 'export-notch-shape-not-written' &&
+        i.message.includes('depth, width and angle') &&
+        i.message.includes('layer "4"'),
+    ),
+    result.issues.find((i) => i.code === 'export-notch-shape-not-written')?.message ?? 'missing',
+  );
+  check(
+    'notches are no longer listed among the concepts the writer drops',
+    // The *list* is what matters — everything before "were not written".
+    // The sentence after it legitimately mentions notches, since that is now
+    // one of the two things the writer does emit.
+    result.issues
+      .filter((i) => i.code === 'export-concept-not-written')
+      .every((i) => !i.message.slice(0, i.message.indexOf('were not written')).includes('notch')),
+    result.issues.find((i) => i.code === 'export-concept-not-written')?.message.split('were not written')[0] ?? 'none',
+  );
+  check(
+    'a notch-free piece gets no notch diagnostics at all',
+    !exportDxfWithDiagnostics(withoutNotches, OPTIONS).issues.some((i) => i.code.startsWith('export-notch')),
+    'ok',
+  );
+  check(
+    'the notch binding is reported as observed-but-unverified, like the boundary',
+    result.issues.some((i) => i.code === 'layer-map-observed-not-verified' && i.message.includes('notch')),
+    result.issues.find((i) => i.code === 'layer-map-observed-not-verified')?.message ?? 'missing',
+  );
+
+  /* --- Determinism, with notches in play ---------------------------------- */
+
+  check('a notched document still exports byte-identically twice', exportDxf(withNotches, OPTIONS) === text, 'stable');
+  check(
+    'notches are written in seam order, so array order cannot change the bytes',
+    (() => {
+      const shuffled: PatternDocument = {
+        ...withNotches,
+        pieces: withNotches.pieces.map((p) => ({ ...p, notches: [...p.notches].reverse() })),
+      };
+      return exportDxf(shuffled, OPTIONS) === text;
+    })(),
+    'order-independent',
+  );
 }
 
 console.log(failures === 0 ? '\nAll DXF export checks passed.' : `\n${failures} DXF export check(s) FAILED.`);

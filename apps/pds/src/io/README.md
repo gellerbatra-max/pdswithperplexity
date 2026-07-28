@@ -36,7 +36,7 @@ io/
 | DXF import (tokenizer, BLOCK/INSERT resolution, topology rebuild) | **Real**, scoped to what three real fixtures prove: boundary polylines including outlines split into head-to-tail chains, units from `$INSUNITS` / `Units:` (METRIC, IMPERIAL, ENGLISH), self-labelled `Key:Value` metadata, LINE kept as unclaimed construction geometry, and POINT entities read as notches and turn/curve markers |
 | Companion `.RUL` grade rule table | **Real** — parsed into `SizeRange` + `GradeRule[]`, attached to points via the DXF's `# N` marks. Optional: absent, the geometry imports identically |
 | DXF curve entities | **Real, but spec-driven rather than evidence-driven** — bulge and `ARC` reconstruct exactly, a degree-3 four-point `SPLINE` becomes an exact cubic, any other `SPLINE` is chorded to `FLATTEN_TOLERANCE_MM` and reported as approximated. Fixtures are synthetic; see below |
-| DXF writer | **Real, for the piece boundary only.** R12 ASCII: HEADER/`$INSUNITS`, one BLOCK + POLYLINE per piece, one INSERT each. Arcs written as vertex bulges (exact, round-trip proven); cubics flattened to `FLATTEN_TOLERANCE_MM` and reported. Deterministic — byte-identical for the same document. Every concept it declines to write is reported per piece |
+| DXF writer | **Real, for piece boundaries and notch positions.** R12 ASCII: HEADER/`$INSUNITS`, one BLOCK + POLYLINE per piece, one INSERT each. Arcs written as vertex bulges (exact, round-trip proven); cubics flattened to `FLATTEN_TOLERANCE_MM` and reported. Deterministic — byte-identical for the same document. Every concept it declines to write is reported per piece |
 
 ### The three fixtures, and what each one broke
 
@@ -150,11 +150,19 @@ untested. Import can afford to read a contradicted layer and warn. Export
 cannot — a wrong layer number leaves the mistake in someone else's cutting
 room, and there is no diagnostic there to read it.
 
-So the writer emits exactly one concept: `piece-boundary`, layer 1 — the only
-binding with three independent vendor files agreeing on both the number and
-the entity kind. Notches, grain, internal lines, construction points and
-annotation are **not written**, and each is reported per piece
-(`export-concept-not-written`) rather than a piece arriving silently stripped.
+So the writer emits the two concepts real files evidence: `piece-boundary`
+(layer 1, POLYLINE — three vendor files agree) and `notch` (layer 4, POINT —
+one file, but confirmed by *geometry*: its layer-4 points land exactly on the
+outline). Neither is `verified: true`, so both warn on every export. Grain,
+internal lines, construction points and annotation are **not written**, and
+each is reported per piece (`export-concept-not-written`) rather than a piece
+arriving silently stripped.
+
+A notch's position is written; its shape is not. Kind, depth, width and angle
+have no representation in a bare POINT, and the paired 7mm inner point a real
+file carries is the convention the importer already declined to read as depth
+— so `export-notch-shape-not-written` says what a reader will and will not
+find.
 `includeSeamAllowance` and `includeGradedSizes` are refused the same way,
 naming the contradicted binding that blocks each.
 
