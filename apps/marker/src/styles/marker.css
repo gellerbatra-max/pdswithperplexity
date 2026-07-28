@@ -1416,6 +1416,13 @@ select {
   accent-color: var(--accent);
 }
 
+/* Takes the row's spare width so the longest engine name is not clipped. */
+.autonest__mode {
+  flex: 1;
+  width: auto;
+  height: var(--control-height);
+}
+
 .autonest__effort {
   width: 1.5ch;
   font-variant-numeric: tabular-nums;

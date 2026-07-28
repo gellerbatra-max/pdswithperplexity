@@ -1,6 +1,6 @@
-import type { NestPlan, NestRequest } from './model';
+import type { NestRequest } from './model';
 import type { NestWorkerRequest, NestWorkerResponse } from './nestProtocol';
-import type { NestEngine } from './pipeline';
+import type { NestMode, ScoredRun } from './pipeline';
 
 /**
  * Main-thread orchestration for auto-nest.
@@ -15,7 +15,7 @@ import type { NestEngine } from './pipeline';
 
 export interface NestRunOptions {
   readonly request: NestRequest;
-  readonly engine: NestEngine;
+  readonly mode: NestMode;
   readonly onProgress?: (percent: number) => void;
   readonly timeoutMs?: number;
 }
@@ -31,7 +31,7 @@ export class NestCancelled extends Error {
 }
 
 export interface NestRun {
-  readonly result: Promise<NestPlan>;
+  readonly result: Promise<ScoredRun>;
   /** Stop a run that is taking longer than the user is willing to wait. */
   readonly cancel: () => void;
 }
@@ -45,7 +45,7 @@ export const runNestWorker = (options: NestRunOptions): NestRun => {
   let finish: (action: () => void) => void = () => undefined;
   let rejectRun: (error: Error) => void = () => undefined;
 
-  const result = new Promise<NestPlan>((resolve, reject) => {
+  const result = new Promise<ScoredRun>((resolve, reject) => {
     rejectRun = reject;
     finish = (action: () => void) => {
       if (settled) return;
@@ -66,7 +66,7 @@ export const runNestWorker = (options: NestRunOptions): NestRun => {
         return;
       }
       if (message.type === 'RESULT') {
-        finish(() => resolve(message.plan));
+        finish(() => resolve(message.run));
         return;
       }
       finish(() => reject(new Error(message.message)));
@@ -79,7 +79,7 @@ export const runNestWorker = (options: NestRunOptions): NestRun => {
     const message: NestWorkerRequest = {
       type: 'NEST',
       request: options.request,
-      engine: options.engine,
+      mode: options.mode,
     };
     worker.postMessage(message);
   });

@@ -1,4 +1,7 @@
 import { create } from 'zustand';
+// Type-only, so `verbatimModuleSyntax` erases it and the engines stay out of
+// the main bundle.
+import type { NestMode } from '@/nest/pipeline';
 
 /** Canvas tools, one per file under `canvas/tools/`. */
 export type MarkerTool = 'select' | 'drag' | 'buttSlide';
@@ -23,6 +26,8 @@ export interface UiState {
   statusMessage: StatusMessage | null;
   /** A preference rather than document data, so it lives here. */
   nestEffort: NestEffortSetting;
+  /** Which engine, or which intent, auto-nest runs. Also a preference. */
+  nestMode: NestMode;
 
   setTool: (tool: MarkerTool) => void;
   setSelection: (ids: string[]) => void;
@@ -31,6 +36,7 @@ export interface UiState {
   setDockTab: (tab: DockTab) => void;
   setStatus: (level: StatusLevel, text: string) => void;
   setNestEffort: (effort: NestEffortSetting) => void;
+  setNestMode: (mode: NestMode) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -39,6 +45,9 @@ export const useUiStore = create<UiState>((set) => ({
   dockTab: 'piece',
   statusMessage: null,
   nestEffort: 3,
+  // Bottom-left fill, which is what auto-nest ran before the mode existed.
+  // Changing the default would quietly change every existing user's markers.
+  nestMode: 'tightest',
 
   setTool: (activeTool) => set({ activeTool }),
   setSelection: (selection) => set({ selection }),
@@ -58,4 +67,5 @@ export const useUiStore = create<UiState>((set) => ({
   setStatus: (level, text) => set({ statusMessage: { level, text } }),
 
   setNestEffort: (nestEffort) => set({ nestEffort }),
+  setNestMode: (nestMode) => set({ nestMode }),
 }));

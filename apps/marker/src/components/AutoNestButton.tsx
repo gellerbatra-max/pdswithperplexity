@@ -2,7 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRestorePoint } from '@/db/persistence';
 import { markerStatus, utilization } from '@/marker/selectors';
 import { NestCancelled, runNestWorker } from '@/nest/nestRunner';
-import { requestFromMarker, toStorePlacements, type NestEngine } from '@/nest/pipeline';
+import {
+  ENGINE_LABELS,
+  MODE_LABELS,
+  MODE_NOTES,
+  NEST_MODES,
+  requestFromMarker,
+  toStorePlacements,
+  type NestMode,
+} from '@/nest/pipeline';
 import { useMarkerStore } from '@/store/markerStore';
 import { useUiStore, type NestEffortSetting } from '@/store/uiStore';
 
@@ -18,12 +26,9 @@ const EFFORT_VALUES: readonly NestEffortSetting[] = [1, 2, 3, 4, 5];
 const toEffort = (value: number): NestEffortSetting | undefined =>
   EFFORT_VALUES.find((candidate) => candidate === value);
 
-/**
- * Bottom-left fill, which is what this button has always run. The shelf
- * baseline is reachable through the same pipeline; exposing the choice is a
- * product decision, not a plumbing one, so it stays a constant until asked for.
- */
-const ENGINE: NestEngine = 'heuristic';
+/** Narrow a select value to the union, rather than asserting it. */
+const toMode = (value: string): NestMode | undefined =>
+  NEST_MODES.find((candidate) => candidate === value);
 
 const EFFORT_NOTES: Record<NestEffortSetting, string> = {
   1: 'Fastest. 1 cm grid, 8 angles for free pieces.',
@@ -41,6 +46,8 @@ export const AutoNestButton = () => {
 
   const effort = useUiStore((state) => state.nestEffort);
   const setEffort = useUiStore((state) => state.setNestEffort);
+  const mode = useUiStore((state) => state.nestMode);
+  const setMode = useUiStore((state) => state.setNestMode);
   const outstanding = useMarkerStore((state) =>
     (state.document?.trayPieces ?? []).reduce(
       (sum, piece) => sum + Math.max(0, piece.quantity - piece.placed),
@@ -103,20 +110,27 @@ export const AutoNestButton = () => {
     const request = requestFromMarker(marker, ui.nestEffort);
 
     setPercent(0);
-    ui.setStatus('info', `Nesting ${outstanding} piece(s) at effort ${ui.nestEffort}…`);
+    ui.setStatus(
+      'info',
+      `Nesting ${outstanding} piece(s) — ${MODE_LABELS[ui.nestMode]}, effort ${ui.nestEffort}…`,
+    );
 
-    const run = runNestWorker({ request, engine: ENGINE, onProgress: setPercent });
+    const run = runNestWorker({ request, mode: ui.nestMode, onProgress: setPercent });
     cancelRef.current = run.cancel;
 
     try {
-      const plan = await run.result;
+      const { plan, engine } = await run.result;
       useMarkerStore.getState().applyPlacements(toStorePlacements(plan));
 
       const after = useMarkerStore.getState().document;
       const detail = plan.unplaced.length > 0 ? `, ${plan.unplaced.length} would not fit` : '';
+      // Name the engine only when the user did not: picking "Best of both"
+      // means the answer is which one won, and pinning an engine means they
+      // already know.
+      const chose = ui.nestMode === 'best' ? ` via ${ENGINE_LABELS[engine]}` : '';
       ui.setStatus(
         plan.unplaced.length > 0 ? 'warn' : 'ok',
-        `Nested ${plan.placements.length} piece(s)${detail} — ${
+        `Nested ${plan.placements.length} piece(s)${detail}${chose} — ${
           after ? utilization(after).toFixed(1) : '0.0'
         }% utilisation, ${after ? markerStatus(after) : ''}`,
       );
@@ -170,6 +184,26 @@ export const AutoNestButton = () => {
 
       {open ? (
         <div className="autonest__menu" role="dialog" aria-label="Auto-nest options">
+          <label className="autonest__row">
+            <span className="field__label">Engine</span>
+            <select
+              className="field__input autonest__mode"
+              value={mode}
+              onChange={(event) => {
+                const next = toMode(event.target.value);
+                if (next) setMode(next);
+              }}
+            >
+              {NEST_MODES.map((option) => (
+                <option key={option} value={option}>
+                  {MODE_LABELS[option]}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <p className="autonest__note">{MODE_NOTES[mode]}</p>
+
           <label className="autonest__row">
             <span className="field__label">Effort</span>
             <input

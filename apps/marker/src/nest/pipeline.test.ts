@@ -7,9 +7,14 @@ import { NO_SPACING, type NestPiece, type NestPlacement, type NestRequest } from
 import { compareScores } from './scoring';
 import {
   compareEngines,
+  enginesForMode,
+  MODE_LABELS,
+  MODE_NOTES,
   NEST_ENGINES,
+  NEST_MODES,
   requestFromMarker,
   runNest,
+  runMode,
   runScored,
   toHeuristicInput,
   toStorePlacements,
@@ -411,5 +416,147 @@ describe('scored runs', () => {
     const first = compareEngines(request({ pieces })).map((run) => run.engine);
     const second = compareEngines(request({ pieces })).map((run) => run.engine);
     expect(first).toEqual(second);
+  });
+});
+
+describe('mode selection', () => {
+  const pieces = [piece('a', 20, 30), piece('b', 25, 40), piece('c', 15, 20)];
+
+  it('offers exactly the modes the UI shows', () => {
+    expect([...NEST_MODES]).toEqual(['fastest', 'tightest', 'best', 'shelf', 'heuristic']);
+  });
+
+  it('has a label and a note for every mode', () => {
+    for (const mode of NEST_MODES) {
+      expect(MODE_LABELS[mode]).toBeTruthy();
+      expect(MODE_NOTES[mode]).toBeTruthy();
+    }
+  });
+
+  it.each([
+    ['fastest', ['shelf']],
+    ['shelf', ['shelf']],
+    ['tightest', ['heuristic']],
+    ['heuristic', ['heuristic']],
+    ['best', ['shelf', 'heuristic']],
+  ] as const)('%s runs %s', (mode, expected) => {
+    expect([...enginesForMode(mode)]).toEqual(expected);
+  });
+
+  it('runs one engine for every mode except best of both', () => {
+    for (const mode of NEST_MODES) {
+      expect(enginesForMode(mode)).toHaveLength(mode === 'best' ? 2 : 1);
+    }
+  });
+
+  it.each(['fastest', 'shelf'] as const)('%s produces the shelf plan exactly', (mode) => {
+    expect(runMode(request({ pieces }), mode).plan).toEqual(runNest(request({ pieces }), 'shelf'));
+  });
+
+  it.each(['tightest', 'heuristic'] as const)('%s produces the heuristic plan exactly', (mode) => {
+    expect(runMode(request({ pieces }), mode).plan).toEqual(
+      runNest(request({ pieces }), 'heuristic'),
+    );
+  });
+
+  it.each(NEST_MODES)('%s reports which engine actually ran', (mode) => {
+    const run = runMode(request({ pieces }), mode);
+    expect(enginesForMode(mode)).toContain(run.engine);
+  });
+
+  it.each(NEST_MODES)('%s returns one scored run, whatever it cost', (mode) => {
+    // Best-of-both is a different cost, not a different shape.
+    const run = runMode(request({ pieces }), mode);
+    expect(Object.keys(run).sort()).toEqual(['engine', 'plan', 'score']);
+    expect(run.plan.placements).toHaveLength(3);
+    expect(run.score.stability).toBe(1);
+  });
+
+  it.each(NEST_MODES)('%s reports progress once, ending at 100', (mode) => {
+    // A best-of-both run must not restart the bar halfway: that reads as a
+    // failure and a retry.
+    const seen: number[] = [];
+    runMode(request({ pieces }), mode, (percent) => seen.push(percent));
+    expect(seen.at(-1)).toBe(100);
+    expect([...seen].sort((a, b) => a - b)).toEqual(seen);
+    expect(Math.min(...seen)).toBeGreaterThanOrEqual(0);
+  });
+
+  it.each(NEST_MODES)('%s is deterministic across repeated runs', (mode) => {
+    const first = runMode(request({ pieces }), mode);
+    const second = runMode(request({ pieces }), mode);
+    expect(first.plan).toEqual(second.plan);
+    expect(first.engine).toBe(second.engine);
+  });
+
+  it.each(NEST_MODES)('%s gives the UI the shape it already handles', (mode) => {
+    const stored = toStorePlacements(runMode(request({ pieces }), mode).plan);
+    expect(stored).toHaveLength(3);
+    for (const placement of stored) {
+      expect(Object.keys(placement).sort()).toEqual([
+        'flipped',
+        'pieceDefId',
+        'position',
+        'rotation',
+      ]);
+    }
+  });
+});
+
+describe('best of both', () => {
+  it('runs both engines and keeps the better marker', () => {
+    // Ragged widths: bottom-left fill drops pieces into the strip a shelf
+    // wastes, so it should win outright here.
+    const ragged = [
+      piece('a', 40, 55),
+      piece('b', 30, 35),
+      piece('c', 25, 30),
+      piece('d', 20, 20),
+      piece('e', 15, 15),
+    ];
+    const best = runMode(request({ pieces: ragged }), 'best');
+    const shelf = runScored(request({ pieces: ragged }), 'shelf');
+    const heuristic = runScored(request({ pieces: ragged }), 'heuristic');
+
+    expect(best.engine).toBe('heuristic');
+    expect(best.score.utilization).toBeGreaterThan(shelf.score.utilization);
+    expect(best.score.utilization).toBeCloseTo(heuristic.score.utilization, 6);
+  });
+
+  it('never scores worse than either engine alone', () => {
+    const sets: NestPiece[][] = [
+      [piece('a', 20, 30), piece('b', 20, 30), piece('c', 20, 30), piece('d', 20, 30)],
+      [piece('a', 40, 55), piece('b', 30, 35), piece('c', 25, 30)],
+      [piece('tall', 20, 60), piece('short', 20, 30), piece('f', 18, 25)],
+    ];
+    for (const pieces of sets) {
+      const best = runMode(request({ pieces }), 'best');
+      for (const engine of NEST_ENGINES) {
+        const alone = runScored(request({ pieces }), engine);
+        expect(compareScores(best.score, alone.score)).toBeLessThanOrEqual(0);
+      }
+    }
+  });
+
+  it('falls back to the cheaper engine on a tie', () => {
+    // Equal-depth pieces fill a shelf exactly, so there is no gap for
+    // bottom-left fill to exploit and both plans score the same. A tie should
+    // not buy the slower engine.
+    const uniform = [
+      piece('a', 20, 30),
+      piece('b', 20, 30),
+      piece('c', 20, 30),
+      piece('d', 20, 30),
+    ];
+    const best = runMode(request({ pieces: uniform }), 'best');
+    expect(best.engine).toBe('shelf');
+  });
+
+  it('still returns a plan when neither engine can place anything', () => {
+    const impossible = [piece('huge', 20, 500)];
+    const best = runMode(request({ pieces: impossible }), 'best');
+    expect(best.plan.placements).toEqual([]);
+    expect(best.plan.unplaced).toEqual(['huge']);
+    expect(best.score.stability).toBe(1);
   });
 });

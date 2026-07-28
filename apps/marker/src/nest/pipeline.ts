@@ -244,6 +244,100 @@ export const compareEngines = (
       return byScore !== 0 ? byScore : engines.indexOf(a.engine) - engines.indexOf(b.engine);
     });
 
+/* --- Modes --------------------------------------------------------------- */
+
+/**
+ * What the user asked for, as opposed to which engine runs.
+ *
+ * `fastest` and `tightest` are intents: they say what matters on this run and
+ * let the pipeline pick. `shelf` and `heuristic` pin an engine, which is what
+ * you want when comparing markers or chasing a placement you did not expect.
+ * Today an intent resolves to a single engine, so the two pairs behave alike;
+ * they stop behaving alike the moment a third engine lands, and the intent is
+ * the one that keeps working without anybody revisiting their choice.
+ *
+ * `best` is the only mode that pays for two runs.
+ */
+export type NestMode = 'fastest' | 'tightest' | 'best' | 'heuristic' | 'shelf';
+
+export const NEST_MODES: readonly NestMode[] = [
+  'fastest',
+  'tightest',
+  'best',
+  'shelf',
+  'heuristic',
+];
+
+export const MODE_LABELS: Record<NestMode, string> = {
+  fastest: 'Fastest',
+  tightest: 'Tightest',
+  best: 'Best of both',
+  shelf: 'Shelf',
+  heuristic: 'Bottom-left fill',
+};
+
+export const MODE_NOTES: Record<NestMode, string> = {
+  fastest: 'Shelf packing. Rows across the fabric — quickest, loosest.',
+  tightest: 'Bottom-left fill. Slower, and usually the tighter marker.',
+  best: 'Runs both and keeps the better marker. Costs both run times.',
+  shelf: 'Always shelf packing, whatever it scores.',
+  heuristic: 'Always bottom-left fill, whatever it scores.',
+};
+
+/**
+ * The engines a mode will run.
+ *
+ * `best` is the only one that returns more than a single engine, and it runs
+ * them in the declared order so a tie resolves to the cheaper one.
+ */
+export const enginesForMode = (mode: NestMode): readonly NestEngine[] => {
+  switch (mode) {
+    case 'fastest':
+    case 'shelf':
+      return ['shelf'];
+    case 'tightest':
+    case 'heuristic':
+      return ['heuristic'];
+    case 'best':
+      return NEST_ENGINES;
+  }
+};
+
+/**
+ * Run whatever the mode asks for and return the winner.
+ *
+ * Always a single `ScoredRun`, so a caller handles one result whether one
+ * engine ran or two — `best` is not a different shape, only a different cost.
+ *
+ * Progress is scaled across the engines a mode runs, so a best-of-both run
+ * reports 0–100 once rather than twice. A bar that restarts halfway reads as a
+ * failure and a retry.
+ */
+export const runMode = (
+  request: NestRequest,
+  mode: NestMode,
+  onProgress?: NestProgress,
+): ScoredRun => {
+  const engines = enginesForMode(mode);
+
+  const runs = engines.map((engine, index) =>
+    runScored(request, engine, (percent) =>
+      onProgress?.(Math.round((index * 100 + percent) / engines.length)),
+    ),
+  );
+
+  const ranked = [...runs].sort((a, b) => {
+    const byScore = compareScores(a.score, b.score);
+    // Ties keep the declared order, so the winner never depends on which of
+    // two equal plans happened to be scored first.
+    return byScore !== 0 ? byScore : engines.indexOf(a.engine) - engines.indexOf(b.engine);
+  });
+
+  const winner = ranked[0];
+  if (!winner) throw new Error(`No engine to run for mode "${mode}"`);
+  return winner;
+};
+
 /* --- Boundaries ---------------------------------------------------------- */
 
 /**

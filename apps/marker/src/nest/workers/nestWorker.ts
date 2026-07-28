@@ -12,7 +12,7 @@
  */
 
 import type { NestWorkerRequest, NestWorkerResponse } from '../nestProtocol';
-import { runNest } from '../pipeline';
+import { runMode } from '../pipeline';
 
 const post = (message: NestWorkerResponse): void => {
   self.postMessage(message);
@@ -25,10 +25,10 @@ self.onmessage = (event: MessageEvent<NestWorkerRequest>) => {
   try {
     // Progress ticks once per piece placed, which is the only boundary either
     // algorithm actually has — anything finer would be invented.
-    const plan = runNest(message.request, message.engine, (percent) =>
+    const run = runMode(message.request, message.mode, (percent) =>
       post({ type: 'PROGRESS', percent }),
     );
-    post({ type: 'RESULT', plan });
+    post({ type: 'RESULT', run });
   } catch (error) {
     post({
       type: 'ERROR',
