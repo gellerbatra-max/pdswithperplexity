@@ -255,41 +255,39 @@ export const compareEngines = (
 /* --- Modes --------------------------------------------------------------- */
 
 /**
- * What the user asked for, as opposed to which engine runs.
+ * What the user asked for.
  *
- * `fastest` and `tightest` are intents: they say what matters on this run and
- * let the pipeline pick. `shelf` and `heuristic` pin an engine, which is what
- * you want when comparing markers or chasing a placement you did not expect.
- * Today an intent resolves to a single engine, so the two pairs behave alike;
- * they stop behaving alike the moment a third engine lands, and the intent is
- * the one that keeps working without anybody revisiting their choice.
+ * One entry per engine, plus `best`. There were once `fastest` and `tightest`
+ * as well — intents that let the pipeline pick — but each resolved to a single
+ * engine, so the menu offered five choices with three outcomes. Two rows that
+ * do what two other rows do is a question the user has to stop and answer, and
+ * "which is faster" belongs in the note rather than in a second name for the
+ * same engine.
+ *
+ * Worth revisiting only if a third engine lands and picking by intent stops
+ * being the same as picking by name.
  *
  * `best` is the only mode that pays for two runs.
  */
-export type NestMode = 'fastest' | 'tightest' | 'best' | 'heuristic' | 'shelf';
+export type NestMode = 'shelf' | 'heuristic' | 'best';
 
-export const NEST_MODES: readonly NestMode[] = [
-  'fastest',
-  'tightest',
-  'best',
-  'shelf',
-  'heuristic',
-];
+/** Cheapest, then tightest, then both. The menu reads in that order. */
+export const NEST_MODES: readonly NestMode[] = ['shelf', 'heuristic', 'best'];
 
+/**
+ * Exactly the engine labels, so an engine is called one thing everywhere.
+ * `ENGINE_LABELS` is the source; a test pins them together.
+ */
 export const MODE_LABELS: Record<NestMode, string> = {
-  fastest: 'Fastest',
-  tightest: 'Tightest',
+  shelf: ENGINE_LABELS.shelf,
+  heuristic: ENGINE_LABELS.heuristic,
   best: 'Best of both',
-  shelf: 'Shelf',
-  heuristic: 'Bottom-left fill',
 };
 
 export const MODE_NOTES: Record<NestMode, string> = {
-  fastest: 'Shelf packing. Rows across the fabric — quickest, loosest.',
-  tightest: 'Bottom-left fill. Slower, and usually the tighter marker.',
-  best: 'Runs both and keeps the better marker. Costs both run times.',
-  shelf: 'Always shelf packing, whatever it scores.',
-  heuristic: 'Always bottom-left fill, whatever it scores.',
+  shelf: 'Lays pieces in rows across the fabric. Quickest, usually a little looser.',
+  heuristic: 'Drops each piece into the first gap it fits. Slower, usually tighter.',
+  best: 'Runs both and keeps the better marker. Takes about as long as the two together.',
 };
 
 /**
@@ -300,10 +298,8 @@ export const MODE_NOTES: Record<NestMode, string> = {
  */
 export const enginesForMode = (mode: NestMode): readonly NestEngine[] => {
   switch (mode) {
-    case 'fastest':
     case 'shelf':
       return ['shelf'];
-    case 'tightest':
     case 'heuristic':
       return ['heuristic'];
     case 'best':

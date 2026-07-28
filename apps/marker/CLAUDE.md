@@ -1286,20 +1286,22 @@ maps and the mode mapping; it fails on drift rather than letting it ship.
 
 `NestMode` in `nest/pipeline.ts`. `enginesForMode` is the mapping.
 
-| Mode | Runs | Why |
+| Mode | Menu label | Runs |
 |---|---|---|
-| `fastest` | Shelf | Intent: cheapest run |
-| `tightest` | Bottom-left fill | Intent: least fabric |
-| `best` | Both, keeps the better score | When it matters more than the wait |
-| `shelf` | Shelf | Pinned engine |
-| `heuristic` | Bottom-left fill | Pinned engine |
+| `shelf` | Shelf | Shelf |
+| `heuristic` | Bottom-left fill | Bottom-left fill |
+| `best` | Best of both | Both, keeps the better score |
 
-**Why `fastest` and `tightest` are intents.** They say what matters on this
-run and let the pipeline pick. `shelf` and `heuristic` pin an engine, which is
-what you want when comparing markers or chasing an unexpected placement. Today
-each intent resolves to one engine, so the pairs behave alike — they stop
-behaving alike the moment a third engine lands, and the intent keeps working
-without anyone revisiting their choice.
+One row per engine, plus best-of-both. The mode labels for the two engines
+*are* `ENGINE_LABELS`, referenced rather than retyped, so drift is not
+possible without deleting the reference.
+
+**Why not five.** There were also `fastest` and `tightest` — intents that let
+the pipeline choose. Each resolved to a single engine, so the menu offered
+five choices with three outcomes, and two rows did what two other rows did.
+"Which is faster" belongs in the note, not in a second name for the same
+engine. Worth revisiting only if a third engine lands and picking by intent
+stops being the same as picking by name.
 
 **Why `best` exists.** Bottom-left fill does not always win. On uniform piece
 depths a shelf fills exactly and both engines tie; on one real order the shelf
@@ -1313,9 +1315,11 @@ utilisation. An unsafe marker is not a candidate at any utilisation, and one
 missing four pieces is not a marker. Runtime is deliberately not a tiebreak —
 a marker is cut for weeks and nested once.
 
-**Default is `tightest`.** That is bottom-left fill, which is what Auto-Nest
-ran before modes existed. Changing the default would quietly change the
-markers every existing user gets.
+**Default is `heuristic`** — bottom-left fill, which is what Auto-Nest ran
+before modes existed. It was spelled `tightest` until the menu was cut to
+three; that mode resolved to this same engine, so the default behaviour has
+never changed. `uiStore` holds it in memory only, so there is no stored
+preference to migrate.
 
 ### Shape
 

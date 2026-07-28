@@ -47,7 +47,8 @@ export const useUiStore = create<UiState>((set) => ({
   nestEffort: 3,
   // Bottom-left fill, which is what auto-nest ran before the mode existed.
   // Changing the default would quietly change every existing user's markers.
-  nestMode: 'tightest',
+  // (Was `tightest`, which resolved to this same engine — same behaviour.)
+  nestMode: 'heuristic',
 
   setTool: (activeTool) => set({ activeTool }),
   setSelection: (selection) => set({ selection }),

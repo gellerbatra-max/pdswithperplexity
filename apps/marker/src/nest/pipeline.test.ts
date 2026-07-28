@@ -424,7 +424,8 @@ describe('mode selection', () => {
   const pieces = [piece('a', 20, 30), piece('b', 25, 40), piece('c', 15, 20)];
 
   it('offers exactly the modes the UI shows', () => {
-    expect([...NEST_MODES]).toEqual(['fastest', 'tightest', 'best', 'shelf', 'heuristic']);
+    // One row per engine, plus best-of-both. No second name for the same run.
+    expect([...NEST_MODES]).toEqual(['shelf', 'heuristic', 'best']);
   });
 
   it('has a label and a note for every mode', () => {
@@ -435,13 +436,18 @@ describe('mode selection', () => {
   });
 
   it.each([
-    ['fastest', ['shelf']],
     ['shelf', ['shelf']],
-    ['tightest', ['heuristic']],
     ['heuristic', ['heuristic']],
     ['best', ['shelf', 'heuristic']],
   ] as const)('%s runs %s', (mode, expected) => {
     expect([...enginesForMode(mode)]).toEqual(expected);
+  });
+
+  it('offers one mode per engine, plus best of both', () => {
+    // Every engine reachable, and no two modes doing the same single run.
+    const single = NEST_MODES.filter((mode) => enginesForMode(mode).length === 1);
+    expect(single.map((mode) => enginesForMode(mode)[0]).sort()).toEqual([...NEST_ENGINES].sort());
+    expect(new Set(single).size).toBe(NEST_ENGINES.length);
   });
 
   it('runs one engine for every mode except best of both', () => {
@@ -450,12 +456,14 @@ describe('mode selection', () => {
     }
   });
 
-  it.each(['fastest', 'shelf'] as const)('%s produces the shelf plan exactly', (mode) => {
-    expect(runMode(request({ pieces }), mode).plan).toEqual(runNest(request({ pieces }), 'shelf'));
+  it('shelf produces the shelf plan exactly', () => {
+    expect(runMode(request({ pieces }), 'shelf').plan).toEqual(
+      runNest(request({ pieces }), 'shelf'),
+    );
   });
 
-  it.each(['tightest', 'heuristic'] as const)('%s produces the heuristic plan exactly', (mode) => {
-    expect(runMode(request({ pieces }), mode).plan).toEqual(
+  it('heuristic produces the bottom-left fill plan exactly', () => {
+    expect(runMode(request({ pieces }), 'heuristic').plan).toEqual(
       runNest(request({ pieces }), 'heuristic'),
     );
   });
@@ -579,11 +587,18 @@ describe('the agreed naming and mapping', () => {
   });
 
   it('maps every mode to the agreed engine', () => {
-    expect(enginesForMode('fastest')).toEqual(['shelf']);
     expect(enginesForMode('shelf')).toEqual(['shelf']);
-    expect(enginesForMode('tightest')).toEqual(['heuristic']);
     expect(enginesForMode('heuristic')).toEqual(['heuristic']);
     expect(enginesForMode('best')).toEqual(['shelf', 'heuristic']);
+  });
+
+  it('gives every mode a label and a plain-language note', () => {
+    for (const mode of NEST_MODES) {
+      expect(MODE_LABELS[mode]).toBeTruthy();
+      expect(MODE_NOTES[mode].length).toBeGreaterThan(20);
+      // The note carries the trade-off, so the label never has to.
+      expect(MODE_LABELS[mode]).not.toMatch(/\(/);
+    }
   });
 
   it('keeps bottom-left fill in heuristic.ts and shelf packing in shelf.ts', () => {
