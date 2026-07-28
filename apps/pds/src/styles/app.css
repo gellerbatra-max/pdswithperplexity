@@ -1222,3 +1222,9 @@ body.is-resizing {
   color: var(--text-muted);
   cursor: not-allowed;
 }
+
+.import-badge[data-treatment='notch'],
+.import-badge[data-treatment='marker'] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}

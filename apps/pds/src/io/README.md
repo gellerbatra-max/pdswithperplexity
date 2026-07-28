@@ -15,6 +15,7 @@ io/
     ├── types.ts        Flavour, options, entity kinds, ConversionIssue
     ├── tokenizer.ts     ASCII group-code tokeniser (code/value pairs)
     ├── layerMapping.ts  Pattern concept ↔ DXF layer number, + fixture evidence
+    ├── ruleTable.ts     Companion .RUL grade rule table → SizeRange/GradeRule
     ├── import.ts        Parser + topology rebuild — real; see scope below
     ├── export.ts        Writer (not implemented) + describeExportPlan
     └── validation.ts    Pre-flight checks — implemented, both directions
@@ -26,12 +27,13 @@ io/
 | --- | --- |
 | Format registry, adapter interface | Implemented |
 | Native JSON round-trip | Implemented |
-| DXF layer mapping table | Written, **numbers unverified against ASTM D6673**; `piece-boundary` confirmed empirically against *two* real files, and three other bindings **actively contradicted** by a real file (`conflictingEvidence`) |
+| DXF layer mapping table | Written, **numbers unverified against ASTM D6673**; 6 bindings confirmed against real files, 4 **actively contradicted**, 2 untested. `npm run report:dxf` prints the current state |
 | DXF export validation | Implemented and useful today |
-| DXF import (tokenizer, BLOCK/INSERT resolution, topology rebuild) | **Real**, scoped to what two real fixtures prove: closed boundary polylines, straight-line geometry, units from `$INSUNITS` *or* a `Units:` text field, self-labelled `Key:Value` metadata, and LINE entities kept as unclaimed construction geometry |
+| DXF import (tokenizer, BLOCK/INSERT resolution, topology rebuild) | **Real**, scoped to what three real fixtures prove: boundary polylines including outlines split into head-to-tail chains, units from `$INSUNITS` / `Units:` (METRIC, IMPERIAL, ENGLISH), self-labelled `Key:Value` metadata, LINE kept as unclaimed construction geometry, and POINT entities read as notches and turn/curve markers |
+| Companion `.RUL` grade rule table | **Real** — parsed into `SizeRange` + `GradeRule[]`, attached to points via the DXF's `# N` marks. Optional: absent, the geometry imports identically |
 | DXF writer | **Not implemented** — throws |
 
-### The two fixtures, and why the second one mattered
+### The three fixtures, and what each one broke
 
 `5109s-sp27-pattern.dxf` — 5 blocks, INSERT placement, `$INSUNITS` in inches,
 boundary polylines and nothing else.
@@ -49,6 +51,17 @@ block reader then read as an entity marker — reporting `entity "1" is not
 supported` twenty times over. Fixture 1's `SEQEND` carries no trailing fields,
 so a suite of one file could never have caught it. It is now
 `check-dxf-import.ts` § 21, verified to fail against the pre-fix parser.
+
+`8178v-accumark.dxf` + `8178v-accumark.rul` — Gerber AccuMark 12.0.0, 3 pieces,
+8 sizes, shipped as a **pair**. It broke the biggest remaining assumption:
+that a piece's outline is one polyline. Here each outline is a *chain* of 7–14
+layer-1 polylines laid head-to-tail with zero gap, plus zero-length markers at
+the junctions. Taking the first one — which is what the importer did — gave a
+5-point piece where the file describes 41, and dropped a third piece entirely
+when its first run was a 2-point stub. It also declares `Units: ENGLISH`
+(inches, which fell through to millimetres and scaled everything by 1/25.4),
+puts POINTs on layers 2/3/4, and names a grade rule at each graded point that
+only the `.RUL` can resolve. All four are fixed and covered in §§ 24–29.
 
 Import no longer throws unconditionally — see `importDxf` / `importDxfWithDiagnostics`
 in `import.ts`. It still refuses rather than guessing: an entity kind it
@@ -73,16 +86,29 @@ not that, however real. Evidence is tracked in two weaker fields kept
 deliberately apart from `verified`:
 
 - `observedInFixtures` — a real file uses this layer for this entity kind.
-  `piece-boundary` (layer 1, `POLYLINE`) now has two, from different writers.
-  `grain-line` (layer 7, `LINE`) has one, and that is *entity-kind* agreement
-  only; see below.
+  Six bindings now carry it: `piece-boundary` (three files), `grain-line`
+  (two), and `turn-point`, `curve-point`, `notch` and `mirror-line` (one each,
+  all from the AccuMark file).
 - `conflictingEvidence` — a real file uses this layer for an entity kind the
-  binding does not list. Three bindings now carry this: `grade-reference`
-  (layer 5 holds `LINE`, not `POINT`), `sew-line` (layer 15 holds `TEXT`, not
-  a polyline), and `piece-boundary` (layer 1 holds metadata `TEXT` as well as
-  the boundary). Recorded, not acted on — a table rewritten to match whichever
-  file arrived last is worse than one that is honestly wrong in a documented
-  way. `importDxf` reports each as a `layer-entity-conflict` warning.
+  binding does not list. Four bindings carry it: `grade-reference` (layer 5
+  holds `LINE`, not `POINT` — in **two unrelated files**, which is the
+  strongest disconfirmation here), `drill-hole` (layer 8 holds everything
+  except `POINT`), `stripe-reference` (layer 14 holds `POLYLINE`/`TEXT`), and
+  `sew-line` (layer 15 holds `TEXT`). `piece-boundary` is on both lists: layer
+  1 carries the boundary *and* one writer's metadata text.
+
+Recorded, not acted on — a table rewritten to match whichever file arrived
+last is worse than one that is honestly wrong in a documented way.
+`importDxf` reports each conflict as a `layer-entity-conflict` warning, and
+`npm run report:dxf` prints the whole evidence table.
+
+**Notches are the one concept confirmed by geometry rather than entity kind.**
+Layer-4 POINTs in the AccuMark file land *exactly* on the outline — 0.000mm —
+which is what a notch is. They arrive paired with a second POINT a constant
+7.00mm inside; that is what a notch *depth* marker looks like, but the file
+never says so, so the on-seam point becomes the notch (at this app's own
+default depth) and the inner one is reported with its measured offset rather
+than read as a depth.
 
 **Why the importer still won't read a grain line.** Layer 7 is the one place
 the table and a real file agree on entity kind, and it is *still* not enough.
@@ -93,10 +119,9 @@ is the grain. So both are imported as `InternalLine`s with role
 claimed. A piece cut off-grain is scrap, which makes this the one place where
 guessing costs more than waiting.
 
-The remaining concepts — turn points, curve points, notches, drill holes,
-mirror line, internal lines, annotation, stripe reference — are unconfirmed by
-*either* the standard or a real file. `validateForExport` still treats any
-unverified binding as a blocking error for export, unchanged.
+Only `internal-line` (layer 11) and `annotation` (layer 13) remain untouched
+by any real file. `validateForExport` still treats every unverified binding as
+a blocking error for export, unchanged.
 
 ## The hard part, when someone picks this up
 
@@ -104,27 +129,34 @@ Export is still the easier half, still unstarted: we own the topology, so
 there is nothing to infer. The work is emitting blocks, choosing a chord
 tolerance for flattening curves, and unit conversion.
 
-Import's hard part — inferring topology DXF doesn't carry — turned out to be
-smaller than the docs here used to suggest, for the specific case real files
-prove: a `BLOCK` *is* one piece, its `POLYLINE` *is* the boundary, and with no
-curve entities in either file, "every vertex is a corner joined by a straight
-line" isn't an inference at all, it's the file's literal content.
+Import's hard part — inferring topology DXF doesn't carry — is smaller than
+these docs once suggested, but not as small as two fixtures made it look. A
+`BLOCK` is one piece and no fixture yet carries a curve entity, so "every
+vertex is a corner joined by a straight line" is still the file's literal
+content rather than an inference. But "its `POLYLINE` is the boundary" turned
+out to be false: the AccuMark file writes each outline as a chain of 7–14
+polylines, and the assumption cost a piece and 90% of another before a third
+file exposed it.
 
 The genuinely hard part is not parsing. It is knowing what a layer number
-means — and the second fixture made that harder rather than easier, by
-contradicting the table in three places. That is still progress: "unverified"
-was a suspicion before and is now a measurement. But it means notch, drill and
-internal-line *semantics* are further from settled than a one-file regression
-set made them look.
+means, and each new file has made that picture sharper in both directions:
+six bindings now have real-file backing, four are contradicted, and layer 5 is
+contradicted *twice over by unrelated writers*. "Unverified" was a suspicion
+two files ago; it is a measurement now.
 
-**The next file should have a notch in it.** Notches are the highest-value
-unbuilt concept — they drive seam matching, the `Notch` model is already there
-waiting, and neither fixture contains a single one, so the layer-4 binding is
-untested by anything. A file with a real curve entity (`ARC`, `SPLINE`, or a
-`POLYLINE` carrying bulge factors) is the next most useful, since both
-fixtures so far are densely-sampled straight lines and the curve path has
-never run against real data. Failing either, the ASTM D6673 text itself would
-settle the three conflicts above, which no quantity of vendor files can.
+**The next file should have a curve in it.** Every fixture so far is
+densely-sampled straight lines, so `SegmentGeometry`'s arc and cubic cases —
+which the editor and the offset kernel are built around — have never once run
+against real imported data. A file with `ARC`, `SPLINE`, or a `POLYLINE`
+carrying bulge factors would be the first to exercise them, and would settle
+whether the "every vertex is a corner" reading holds up or is an artefact of
+three files that happen to pre-flatten.
+
+After that: a file that uses layer 11 or 13 (the last two untested bindings),
+and a second `.RUL`-bearing style from a *different* CAD system, to show
+whether the rule-table format is as stable as it looks. None of that replaces
+the ASTM D6673 text, which is the only thing that can settle the four
+contradictions — no quantity of vendor files can.
 
 ## Trying it now
 
@@ -148,9 +180,21 @@ Two commands exercise the importer from the terminal:
 npm run check:dxf --workspace=apps/pds
 ```
 
-131 assertions against both real fixtures. Expected values are transcribed by
-hand from each fixture's raw group codes and re-derived independently of
-`import.ts`, so a bug shared between the importer and its test still fails.
+167 assertions across all three real fixtures. Expected values are
+transcribed by hand from each fixture's raw group codes and re-derived
+independently of `import.ts`, so a bug shared between the importer and its
+test still fails.
+
+```bash
+npm run check:rul --workspace=apps/pds
+```
+
+24 assertions on the companion rule-table parser, kept separate because the
+`.RUL` format is its own thing with its own failure modes. The load-bearing
+one is the base-size column: a grade rule is displacement *relative to* the
+sample size, so a non-zero there means misaligned columns or a wrong
+`SAMPLE SIZE` header, and grading from it would move every point of every
+piece — including the size that was meant to be the reference.
 
 ```bash
 npm run report:dxf --workspace=apps/pds

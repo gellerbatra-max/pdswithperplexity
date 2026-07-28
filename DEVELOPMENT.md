@@ -37,7 +37,8 @@ intended tool sets, because there the list is the only statement of coverage.
 | Point role (smooth / corner) | Real — inspector control, enforced on handles, shown on canvas |
 | Numeric point + edge editing | Real — inspector writes through commands |
 | Grading | Real — named sizes, a shared grade-rule table, per-point propagation, full rule/assignment CRUD as undoable commands, real diagnostics. See below; a real *solver* (construction-line-aware, seam-length-preserving) is still future work |
-| DXF import | Real for what two production files prove — boundary polylines via BLOCK/INSERT, straight-line geometry, units from `$INSUNITS` or a `Units:` field, self-labelled `Key:Value` metadata, `LINE` kept as unclaimed construction geometry. Notches, drill holes, curves: not read, warned and skipped. Grain deliberately *not* claimed. Reachable from the UI: `Import DXF (AAMA/ASTM)…` picks a file, a review dialog shows the full account (per-layer treatment, table conflicts, diagnostics) before anything replaces the open document, and the session stays inspectable afterwards via `Show last DXF import report` |
+| DXF import | Real for what three production files prove — outlines including ones split into head-to-tail polyline chains, units from `$INSUNITS` or a `Units:` field (METRIC/IMPERIAL/ENGLISH), self-labelled `Key:Value` metadata, `LINE` kept as unclaimed construction geometry, `POINT` read as notches and turn/curve markers. Curves and drill holes: not read, warned and skipped. Grain deliberately *not* claimed. Reachable from the UI: `Import DXF (AAMA/ASTM)…` picks the file (and its `.RUL`), a review dialog shows the full account before anything replaces the open document, and the session stays inspectable via `Show last DXF import report` |
+| DXF grading (`.RUL`) | Real — the companion rule table parses into `SizeRange` + `GradeRule[]` and attaches to points via the DXF's `# N` marks. Optional and non-destructive: without it the geometry imports identically |
 | DXF export | **Not implemented** — throws |
 | Undo/redo | Real — inverse-command stack (`historyStore.ts` + `documentCommands.ts`) |
 | Persistence | Real, partially — autosave to IndexedDB; **no file story yet** (no download/upload) |
@@ -135,17 +136,20 @@ overrides work. `npm run check:offset` verifies it against hand-derivable
 answers — squares, an L, a slot narrower than twice the offset, and a circle.
 
 `npm run check` runs all five self-check suites — curve, offset, round-trip,
-grading and DXF import, 329 assertions. They are not a test framework and are
+grading, DXF import and the DXF rule table, 389 assertions. They are not a
+test framework and are
 not an argument for adding one; they exist because this is the code whose
 mistakes look plausible on screen and only show up in someone's cut file.
 `scripts/` carries a small Node resolver hook so the checks can import the
 app's aliased, extensionless source without a bundler or any dependency.
-`check-dxf-import.ts` is the one suite that reads external files
-(`scripts/fixtures/dxf/`) rather than building its fixture inline — two real
-production DXFs, not synthetic ones, because parser correctness here means
-"agrees with what a real exporter actually writes," which a hand-built fixture
-cannot prove either way. The second file earned its place immediately by
-exposing a `SEQEND` desync the first one structurally could not. `check-grading.ts` is the one suite that also
+`check-dxf-import.ts` and `check-rul.ts` are the suites that read external
+files (`scripts/fixtures/dxf/`) rather than building fixtures inline — three
+real production DXFs and one real rule table, not synthetic ones, because
+parser correctness here means "agrees with what a real exporter actually
+writes," which a hand-built fixture cannot prove either way. Each new file has
+paid for itself immediately: the second exposed a `SEQEND` desync the first
+structurally could not, and the third exposed a boundary assumption that had
+been silently costing 90% of an outline. `check-grading.ts` is the one suite that also
 exercises the Zustand stores directly (not just pure
 `pattern/` functions) — undo/redo exactness for a command is only provable by
 running the real command through the real history stack.
@@ -319,7 +323,7 @@ settles.
   to flag a length mismatch across the size range, but nothing yet visualises
   a walk seam-to-seam the way a Fit walk tool would.
 
-### 5. DXF — import is real for two files' worth of production data; export is not
+### 5. DXF — import is real for three files' worth of production data; export is not
 
 Two real production DXFs are the truth source for what this importer claims to
 handle, replacing the "throws unconditionally" scaffold:
@@ -328,6 +332,7 @@ handle, replacing the "throws unconditionally" scaffold:
 | --- | --- | --- |
 | `5109s-sp27-pattern.dxf` | 5 pieces, BLOCK/INSERT, `$INSUNITS` in inches | Boundary polylines, placement, unit conversion, vertex-noise cleanup |
 | `tshirt-demo-aama.dxf` | 20 blocks (5 pieces × 3 sizes), different writer, declares ASTM D6673-04 | No `$INSUNITS` (uses a `Units:` field), `Key:Value` metadata, `LINE` and `TEXT` entities, `SEQEND` with trailing fields |
+| `8178v-accumark.dxf` + `.rul` | Gerber AccuMark 12.0.0, 3 pieces, 8 sizes, DXF **and** rule table | Outlines split into head-to-tail polyline chains, `Units: ENGLISH`, `POINT` on layers 2/3/4, a real grading dataset |
 
 What changed and what didn't:
 
@@ -417,14 +422,73 @@ carrying trailing group codes.
   recurs once per size; each placement imports as its own piece, and
   `sizes-imported-flat` says so. No graded size range is inferred — that would
   be grading, which this module does not invent.
-- **What would unblock the next slice**: a file with a **notch** in it.
-  Notches drive seam matching, the `Notch` model is already there, and neither
-  fixture contains one, so the layer-4 binding is untested by anything. A file
-  with a real curve entity (`ARC`, `SPLINE`, or `POLYLINE` bulge factors) is
-  next most useful — both fixtures are densely-sampled straight lines, so the
-  curve path has never run on real data. Failing either, the ASTM D6673 text
-  would settle the three conflicts above, which no quantity of vendor files
-  can.
+#### The third fixture: chained outlines, ENGLISH units, POINTs, and a rule table
+
+`8178v-accumark.dxf` broke the largest remaining assumption — that a piece's
+outline is *one* polyline:
+
+- **Outlines are chains.** Each piece's outline is 7–14 layer-1 polylines laid
+  head-to-tail with exactly zero gap, with zero-length markers at the
+  junctions. The importer took the first and called it the boundary: a 5-point
+  piece where the file describes 41, and one piece dropped entirely because its
+  first run was a 2-point stub. `chainBoundary` now joins consecutive runs
+  where the previous end *is* the next start, in file order only — no
+  searching, no reordering, no reversing, because a matcher that hunts for a
+  partner would happily assemble a ring out of an internal line.
+- **`Units: ENGLISH`** is AccuMark's word for inches. It had been falling
+  through to the assumed millimetre, scaling every coordinate by 1/25.4.
+- **`POINT` entities are read** where the layer table has a point binding:
+  layer 4 becomes real notches, layers 2 and 3 become labelled `construction`
+  points. Everything else still warns and skips.
+- **Notches confirmed by geometry, not just entity kind.** Layer-4 POINTs land
+  *exactly* on the outline (0.000mm). They come paired with a second POINT a
+  constant 7.00mm inside — which is what a depth marker looks like, but the
+  file never says so, so the on-seam point becomes the notch at this app's own
+  default depth and the inner one is reported with its measured offset.
+  Reading a depth off a distance would be a guess dressed as data.
+- **Metadata keys are matched case-insensitively through an alias table.** Two
+  writers already disagree on both wording and case (`Size Name:S` vs
+  `SIZE: M`). `Fabric`, `Category`, `Annotation` and `Size` are now read;
+  unrecognised keys are reported *with their values* rather than merely
+  counted.
+- **`CATEGORY: FRONT` is not a cut category.** It names the piece's role, not
+  shell/lining/interlining/trim, so it is kept as description and the category
+  is left at its default — mapping it would put a front panel in the wrong cut
+  bundle.
+
+#### The `.RUL` companion, and why grading stays a separate pass
+
+`io/dxf/ruleTable.ts` parses the rule table into `SizeRange` + `GradeRule[]`
+with no DXF coupling at all: it reads a rule table, and `import.ts` decides
+whether one is present. The DXF marks each graded point with a `# N` text;
+those are matched to boundary points **by coordinate**, not by order — the
+file writes 30 such texts against 41 points in one piece, repeating a rule at
+a point several times, so the lists were never parallel. Checked across all
+three pieces: every text lands on a point to the digit, and no position ever
+carries two different numbers.
+
+Grading is attached to finished geometry and never used to build it. The test
+that holds this down asserts every coordinate is identical with and without
+the rule table.
+
+The load-bearing check in `check-rul.ts` is the **base-size column**: a grade
+rule is displacement *relative to* the sample size, so the pair at the sample
+size's position must be zero. A non-zero one means misaligned columns or a
+wrong `SAMPLE SIZE` header, and grading from it would displace every point of
+every piece in every size — including the one meant to be the reference. It is
+verified twice: once through the parser, once by re-reading the fixture's raw
+text without it.
+
+- **What would unblock the next slice**: a file with a **curve** in it. Every
+  fixture so far is densely-sampled straight lines, so `SegmentGeometry`'s arc
+  and cubic cases — which the editor and the offset kernel are built around —
+  have never run against real imported data. `ARC`, `SPLINE`, or a `POLYLINE`
+  with bulge factors would be the first to exercise them, and would settle
+  whether "every vertex is a corner" holds or is an artefact of three files
+  that pre-flatten. After that: layers 11 and 13 (the last untested bindings),
+  and a `.RUL`-bearing style from a different CAD system. None of it replaces
+  the ASTM D6673 text, which is the only thing that can settle the four
+  contradictions.
 
 #### The import workflow (how the parser is reached from the app)
 

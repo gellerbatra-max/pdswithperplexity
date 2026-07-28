@@ -535,8 +535,12 @@ check(
 check(
   'cut quantity is read from the file rather than defaulted',
   tshirtDoc.pieces.every((p) => p.meta.quantity === 1) &&
-    tshirtIssues.some((i) => i.code === 'metadata-not-in-source' && i.message.includes('Cut quantity was read')),
-  'ok',
+    // The defaults warning names only what actually defaulted, so a file that
+    // states its quantity must not be told its quantity defaulted.
+    tshirtIssues.some(
+      (i) => i.code === 'metadata-not-in-source' && !i.message.includes('cut quantity'),
+    ),
+  tshirtIssues.find((i) => i.code === 'metadata-not-in-source')?.message ?? 'missing',
 );
 check(
   'the ambiguous "Quantity:1,0" is reported rather than silently interpreted',
@@ -546,8 +550,13 @@ check(
 check(
   'fabric and category are still flagged as having no source',
   tshirtDoc.pieces.every((p) => p.meta.fabric === '' && p.meta.category === 'shell') &&
-    tshirtIssues.some((i) => i.code === 'metadata-not-in-source' && i.message.includes('Fabric and category')),
-  'ok',
+    tshirtIssues.some(
+      (i) =>
+        i.code === 'metadata-not-in-source' &&
+        i.message.includes('category') &&
+        i.message.includes('fabric'),
+    ),
+  tshirtIssues.find((i) => i.code === 'metadata-not-in-source')?.message ?? 'missing',
 );
 check(
   'each piece records the size name the file gave it',
@@ -768,6 +777,287 @@ for (const [blockName, rawLines] of Object.entries(TSHIRT_RAW_LINES)) {
       ),
     'ok',
   );
+}
+
+/* ===========================================================================
+ * Fixture 3 — 8178v-accumark.dxf, a Gerber AccuMark export with a .RUL pair
+ *
+ * The file that broke the "one polyline per piece" assumption. Its outline is
+ * written as a *chain* of layer-1 polylines — 14, 7 and 13 of them for the
+ * three pieces — laid head-to-tail with zero gap, plus zero-length markers at
+ * the junctions. It also declares `Units: ENGLISH`, carries POINT entities on
+ * layers 2/3/4, and names a grade rule at each graded point which only the
+ * companion .RUL can resolve.
+ *
+ * Reference values below are transcribed from the raw group codes and, where
+ * geometry is involved, re-derived here rather than read back out of the
+ * importer.
+ * ========================================================================= */
+
+const ACCUMARK_PATH = fileURLToPath(new URL('./fixtures/dxf/8178v-accumark.dxf', import.meta.url));
+const ACCUMARK_RUL_PATH = fileURLToPath(new URL('./fixtures/dxf/8178v-accumark.rul', import.meta.url));
+const accumark = readFileSync(ACCUMARK_PATH, 'utf8');
+const accumarkRul = readFileSync(ACCUMARK_RUL_PATH, 'utf8');
+
+const acc = importDxfWithDiagnostics(accumark, { flavour: 'aama', assumeUnit: 'mm' });
+const accCodes = new Set(acc.issues.map((i) => i.code));
+
+/* --- 24. Chained boundary polylines become one outline -------------------- */
+
+check('fixture 3 imports all three of its blocks', acc.document.pieces.length === 3, `${acc.document.pieces.length}`);
+check(
+  'no piece is lost to a degenerate first polyline any more',
+  !accCodes.has('degenerate-boundary') && !acc.issues.some((i) => i.severity === 'error'),
+  acc.issues.filter((i) => i.severity === 'error').map((i) => i.code).join(', ') || 'no errors',
+);
+
+{
+  // Raw layer-1 polyline vertex counts per block, in file order, transcribed
+  // from the group codes. Joining drops each run's first vertex (it repeats
+  // the previous run's last), so the chain length is the sum minus (runs - 1).
+  const RUNS: Readonly<Record<string, readonly number[]>> = {
+    'FRONT': [5, 2, 5, 2, 19, 2, 3, 2, 3, 2, 11, 2, 2],
+  };
+  const front = acc.document.pieces.find((p) => p.meta.code.includes('FRONT'))!;
+  const runs = RUNS['FRONT']!;
+  const chained = runs.reduce((a, b) => a + b, 0) - (runs.length - 1);
+  const corners = front.points.filter((p) => p.role === 'corner').length;
+
+  check(
+    'the FRONT outline is the whole chain, not its first run',
+    corners > runs[0]! && corners <= chained,
+    `${corners} corners from ${runs.length} runs (${chained} before duplicate collapse, first run only would be ${runs[0]})`,
+  );
+  check(
+    'joining is reported, with the number of runs',
+    acc.issues.some((i) => i.code === 'boundary-runs-joined' && i.message.includes(`${runs.length} separate polylines`)),
+    acc.issues.find((i) => i.code === 'boundary-runs-joined')?.message ?? 'missing',
+  );
+  check(
+    'every boundary segment is still a straight line',
+    acc.document.pieces.every((p) => p.segments.every((s) => s.geometry.kind === 'line')),
+    'ok',
+  );
+  check(
+    'the outline is closed and its segments cover its corners exactly once',
+    acc.document.pieces.every(
+      (p) => p.closed && p.boundary.length === p.points.filter((pt) => pt.role === 'corner').length,
+    ),
+    'ok',
+  );
+}
+
+/* --- 25. ENGLISH units ---------------------------------------------------- */
+
+check(
+  'fixture 3 reads "Units: ENGLISH" rather than falling back to the assumed unit',
+  acc.issues.some((i) => i.code === 'units-read' && i.message.includes('Units:ENGLISH') && i.message.includes('25.4mm')) &&
+    !accCodes.has('unit-assumed'),
+  acc.issues.find((i) => i.code === 'units-read')?.message ?? 'missing',
+);
+{
+  // A garment piece measured in inches, converted. If ENGLISH were treated as
+  // millimetres these would come out 25.4x too small — a few centimetres for a
+  // whole back panel, which is the failure this check exists to catch.
+  const back = acc.document.pieces.find((p) => p.meta.code.includes('BACK'))!;
+  const corners = back.points.filter((p) => p.role === 'corner');
+  const width = Math.max(...corners.map((c) => c.position.x)) - Math.min(...corners.map((c) => c.position.x));
+  check('the imported geometry is a garment-sized piece in millimetres', width > 300 && width < 600, `back panel is ${width.toFixed(0)}mm wide`);
+}
+
+/* --- 26. POINT entities ---------------------------------------------------- */
+
+{
+  const notches = acc.document.pieces.reduce((sum, p) => sum + p.notches.length, 0);
+  check('notch-layer POINTs on the seam become real notches', notches === 3, `${notches} notches`);
+  check(
+    'notches are stored by segment and parameter, as the model requires',
+    acc.document.pieces.every((p) =>
+      p.notches.every((n) => p.boundary.includes(n.segmentId) && n.t >= 0 && n.t <= 1),
+    ),
+    'ok',
+  );
+  check(
+    'notch shape comes from the app default, since the file never states one',
+    acc.document.pieces.every((p) => p.notches.every((n) => n.kind === 'slit' && n.depth === 6 && n.width === 2)),
+    'ok',
+  );
+  check(
+    'the paired off-seam notch markers are reported with their measured offset, not silently dropped',
+    acc.issues.some(
+      (i) =>
+        i.code === 'notch-marker-off-boundary' &&
+        i.message.includes('7.00mm') &&
+        i.message.includes('would be a guess'),
+    ),
+    acc.issues.find((i) => i.code === 'notch-marker-off-boundary')?.message ?? 'missing',
+  );
+
+  const turnCurve = acc.document.pieces.reduce(
+    (sum, p) => sum + p.points.filter((pt) => pt.label === 'Turn point' || pt.label === 'Curve point').length,
+    0,
+  );
+  check('turn- and curve-point POINTs become labelled construction points', turnCurve === 131 + 234, `${turnCurve} of ${131 + 234}`);
+  check(
+    'marker points stay off the outline',
+    acc.document.pieces.every((p) =>
+      p.points.filter((pt) => pt.label === 'Turn point' || pt.label === 'Curve point').every((pt) => pt.role === 'construction'),
+    ),
+    'ok',
+  );
+  check(
+    'POINTs on layers with no point binding are still warned about, not accepted',
+    acc.document.pieces.length === 3 && !acc.issues.some((i) => i.code === 'unsupported-entity' && i.message.includes('layer "2"')),
+    'ok',
+  );
+}
+
+/* --- 27. Metadata from the wider key map ---------------------------------- */
+
+{
+  const front = acc.document.pieces.find((p) => p.meta.code.includes('FRONT'))!;
+  const pouch = acc.document.pieces.find((p) => p.meta.code.includes('POUCH'))!;
+  check('"Fabric: A" is read into the piece rather than defaulted', front.meta.fabric === 'A', front.meta.fabric);
+  check('per-piece quantity is read (the POUCH cuts 2)', front.meta.quantity === 1 && pouch.meta.quantity === 2, `${front.meta.quantity} / ${pouch.meta.quantity}`);
+  check(
+    'the defaults warning no longer claims fabric had no source',
+    acc.issues.some((i) => i.code === 'metadata-not-in-source' && !i.message.includes('fabric')),
+    acc.issues.find((i) => i.code === 'metadata-not-in-source')?.message ?? 'none',
+  );
+  check(
+    '"CATEGORY: FRONT" is kept as description, not forced into a cut category',
+    front.meta.category === 'shell' && front.meta.description?.includes('Category: FRONT') === true,
+    `${front.meta.category} / ${front.meta.description}`,
+  );
+  check(
+    'the category mismatch is explained rather than silently ignored',
+    acc.issues.some((i) => i.code === 'category-not-a-known-category' && i.message.includes('FRONT')),
+    'ok',
+  );
+  check(
+    'the annotation and size the file states both survive into the description',
+    front.meta.description?.includes('CUT X 02') === true && front.meta.description?.includes('Size Name: M') === true,
+    front.meta.description ?? 'missing',
+  );
+  check('the style name is read from the file', acc.document.name === '8178V', acc.document.name);
+  check(
+    'every text field this file writes is now a field the importer reads',
+    !accCodes.has('unknown-metadata-field') &&
+      acc.issues.some(
+        (i) =>
+          i.code === 'metadata-read-from-text' &&
+          i.message.includes('Curve Tolerance=".006"') &&
+          i.message.includes('Author="GERBER TECHNOLOGY'),
+      ),
+    acc.issues.find((i) => i.code === 'unknown-metadata-field')?.message ?? 'nothing unread',
+  );
+  {
+    // The unknown-field path still has to work — it is what keeps a field from
+    // being dropped in silence. No real fixture exercises it any more, so a
+    // synthetic TEXT carrying a key no writer uses is spliced into the real
+    // file's ENTITIES section, the same way § 10 splices a CIRCLE.
+    const eol = accumark.includes('\r\n') ? '\r\n' : '\n';
+    const tail = `  0${eol}ENDSEC${eol}  0${eol}EOF`;
+    const field = [
+      '  0', 'TEXT', '  8', '1', ' 10', '0.0000', ' 20', '0.0000',
+      ' 30', '0.0', ' 40', '1.0000', '  1', 'Shrinkage Pct: 4.5',
+    ].join(eol);
+
+    const at = accumark.lastIndexOf(tail);
+    check('fixture 3 has the expected ENTITIES-closing tail to splice before', at > 0, String(at));
+
+    const probe = importDxfWithDiagnostics(
+      `${accumark.slice(0, at)}${field}${eol}${accumark.slice(at)}`,
+      { flavour: 'aama', assumeUnit: 'mm' },
+    );
+    check(
+      'an unrecognised field is reported with its value, not dropped',
+      probe.issues.some(
+        (i) => i.code === 'unknown-metadata-field' && i.message.includes('"Shrinkage Pct: 4.5"'),
+      ),
+      probe.issues.find((i) => i.code === 'unknown-metadata-field')?.message ?? 'missing',
+    );
+    check(
+      'an unrecognised field changes nothing about the geometry',
+      pieceShape(probe.document) === pieceShape(acc.document),
+      'ok',
+    );
+  }
+}
+
+/* --- 28. The companion rule table ----------------------------------------- */
+
+{
+  check(
+    'without a .RUL, rule numbers on the geometry are reported as unresolved',
+    !accCodes.has('grade-rules-attached') &&
+      acc.document.gradeRules.length === 0 &&
+      acc.issues.some((i) => i.code === 'grade-rules-not-resolved' && i.severity === 'warning'),
+    acc.issues.find((i) => i.code === 'grade-rules-not-resolved')?.message ?? 'missing',
+  );
+
+  const paired = importDxfWithDiagnostics(accumark, {
+    flavour: 'aama',
+    assumeUnit: 'mm',
+    ruleTable: accumarkRul,
+  });
+
+  check('with a .RUL, the document carries its grade rules', paired.document.gradeRules.length === 41, `${paired.document.gradeRules.length}`);
+  check(
+    'the size range comes from the rule table, base size and all',
+    paired.document.sizeRange.sizes.map((s) => s.label).join(' ') === 'XS S M L XL XXL XXXL XXXXL' &&
+      paired.document.sizeRange.sizes.find((s) => s.id === paired.document.sizeRange.baseSizeId)?.label === 'M',
+    paired.document.sizeRange.sizes.map((s) => s.label).join(' '),
+  );
+  check(
+    'graded points are linked to real rules from the table',
+    paired.document.pieces.every((p) =>
+      p.points.every((pt) => pt.gradeRuleId === undefined || paired.document.gradeRules.some((r) => r.id === pt.gradeRuleId)),
+    ) && paired.document.pieces.some((p) => p.points.some((pt) => pt.gradeRuleId !== undefined)),
+    'ok',
+  );
+  check(
+    'only boundary points are graded — construction markers are not',
+    paired.document.pieces.every((p) =>
+      p.points.filter((pt) => pt.gradeRuleId !== undefined).every((pt) => pt.role === 'corner'),
+    ),
+    'ok',
+  );
+  check(
+    'attaching grading is reported with a count',
+    paired.issues.some((i) => i.code === 'grade-rules-attached'),
+    paired.issues.find((i) => i.code === 'grade-rules-attached')?.message ?? 'missing',
+  );
+
+  // The load-bearing property of the whole pairing: grading is association,
+  // never construction. Every coordinate must be identical either way.
+  const coords = (d: PatternDocument): string =>
+    JSON.stringify(d.pieces.map((p) => p.points.map((pt) => [pt.position.x, pt.position.y])));
+  check(
+    'supplying a rule table does not move a single coordinate',
+    coords(paired.document) === coords(acc.document),
+    'ok',
+  );
+  check(
+    'nor does it change the notches or the internal lines',
+    JSON.stringify(paired.document.pieces.map((p) => [p.notches.length, p.internalLines.length])) ===
+      JSON.stringify(acc.document.pieces.map((p) => [p.notches.length, p.internalLines.length])),
+    'ok',
+  );
+
+  const roundTripped = jsonAdapter.deserialize!(jsonAdapter.serialize!(paired.document));
+  check(
+    'a graded import round-trips through the native JSON format, rules and all',
+    JSON.stringify(roundTripped) === JSON.stringify(paired.document),
+    'ok',
+  );
+}
+
+/* --- 29. Fixture 3 determinism -------------------------------------------- */
+
+{
+  const again = importDxfWithDiagnostics(accumark, { flavour: 'aama', assumeUnit: 'mm' });
+  check('fixture 3 re-imports deterministically (ids aside)', pieceShape(again.document) === pieceShape(acc.document), 'ok');
 }
 
 console.log(failures === 0 ? '\nAll DXF import checks passed.' : `\n${failures} DXF import check(s) FAILED.`);

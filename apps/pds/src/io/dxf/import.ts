@@ -1,16 +1,23 @@
 import { toMillimetres, type Vec2 } from '@/geometry';
 import {
+  addNotch,
   createId,
   LINE,
   PATTERN_SCHEMA_VERSION,
+  type GradeRule,
   type InternalLine,
   type PatternDocument,
   type PatternPiece,
+  type PieceCategory,
   type PiecePoint,
   type PieceSegment,
+  type SegmentId,
+  type SizeRange,
 } from '@/pattern';
+import { parseRuleTable } from './ruleTable';
 import { FormatParseError } from '../errors';
 import {
+  conceptForLayer,
   layerForConcept,
   layerMapFor,
   unverifiedBindings,
@@ -204,6 +211,10 @@ const readHeader = (cursor: TokenCursor): Map<string, DxfToken[]> => {
 const UNITS_TEXT_TO_MM: Record<string, number> = {
   METRIC: 1,
   IMPERIAL: 25.4,
+  // AccuMark's spelling for inches. Corroborated twice over in one style: the
+  // DXF's own `Units: ENGLISH` field and the companion .RUL's `UNITS: ENGLISH`
+  // header, on a file whose coordinates only make sense as inches.
+  ENGLISH: 25.4,
 };
 
 /**
@@ -281,11 +292,13 @@ const resolveUnitFactor = (
  */
 
 /** How a given (layer, entity) pair was treated. */
-export type LayerTreatment = 'outline' | 'construction' | 'metadata' | 'skipped';
+export type LayerTreatment = 'outline' | 'construction' | 'notch' | 'marker' | 'metadata' | 'skipped';
 
 export const TREATMENT_LABEL: Record<LayerTreatment, string> = {
   outline: 'imported as the piece outline',
   construction: 'imported as construction geometry, with no meaning claimed',
+  notch: 'imported as a notch on the boundary',
+  marker: 'imported as a construction point marking a turn or curve',
   metadata: 'read as self-labelled metadata',
   skipped: 'not imported',
 };
@@ -395,6 +408,12 @@ interface RawLine {
   readonly end: Vec2;
 }
 
+/** A POINT marker. Its layer is the only thing that says what it marks. */
+interface RawPoint {
+  readonly layer: string;
+  readonly position: Vec2;
+}
+
 /** A TEXT entity's literal string (group 1) and where it sits. */
 interface RawText {
   readonly layer: string;
@@ -408,6 +427,7 @@ interface RawBlock {
   readonly polylines: readonly RawPolyline[];
   readonly lines: readonly RawLine[];
   readonly texts: readonly RawText[];
+  readonly points: readonly RawPoint[];
 }
 
 const readVertex = (cursor: TokenCursor): Vec2 => {
@@ -437,6 +457,19 @@ const readLine = (cursor: TokenCursor): RawLine => {
     // 30/31 (z) — flat 2D pattern geometry only.
   }
   return { layer, start, end };
+};
+
+/** `10/20` is the marker position. POINT has no other geometry. */
+const readPoint = (cursor: TokenCursor): RawPoint => {
+  let layer = '0';
+  let position: Vec2 = { x: 0, y: 0 };
+  while (!cursor.done() && cursor.peek()!.code !== 0) {
+    const token = cursor.next();
+    if (token.code === 8) layer = token.value;
+    else if (token.code === 10) position = { ...position, x: tokenNumber(token) };
+    else if (token.code === 20) position = { ...position, y: tokenNumber(token) };
+  }
+  return { layer, position };
 };
 
 /** Group `1` carries the literal string; `40` (height) and style are not used. */
@@ -503,6 +536,7 @@ const readBlock = (cursor: TokenCursor, issues: ConversionIssue[]): RawBlock => 
   const polylines: RawPolyline[] = [];
   const lines: RawLine[] = [];
   const texts: RawText[] = [];
+  const points: RawPoint[] = [];
   while (!cursor.done() && !cursor.at('ENDBLK')) {
     if (cursor.at('POLYLINE')) {
       cursor.next();
@@ -513,6 +547,9 @@ const readBlock = (cursor: TokenCursor, issues: ConversionIssue[]): RawBlock => 
     } else if (cursor.at('TEXT')) {
       cursor.next();
       texts.push(readText(cursor));
+    } else if (cursor.at('POINT')) {
+      cursor.next();
+      points.push(readPoint(cursor));
     } else {
       const kind = skipEntity(cursor);
       issues.push({
@@ -528,7 +565,7 @@ const readBlock = (cursor: TokenCursor, issues: ConversionIssue[]): RawBlock => 
     skipFields(cursor);
   }
 
-  return { name, basePoint, polylines, lines, texts };
+  return { name, basePoint, polylines, lines, texts, points };
 };
 
 const readBlocksSection = (cursor: TokenCursor, issues: ConversionIssue[]): Map<string, RawBlock> => {
@@ -657,43 +694,81 @@ const parseSections = (cursor: TokenCursor, issues: ConversionIssue[]): ParsedFi
  * left alone instead of being coerced into a field it might not mean.
  */
 
-/** Keys this importer understands. Anything else is reported, not guessed at. */
-const KNOWN_TEXT_KEYS = new Set([
-  'Piece Name',
-  'Size Name',
-  'Quantity',
-  'Rotation',
-  'Style Name',
-  'Creation Date',
-  'Author',
-  'Sample Size',
-  'Grade Rule Table',
-  'Units',
-  'ASTM/D13Proposal 1 Version',
-]);
+/**
+ * Field names this importer understands, mapped from the spellings real files
+ * actually use to one canonical name each.
+ *
+ * Two real writers already disagree on both case and wording — one writes
+ * `Size Name:S`, the other `SIZE: M`; one `Fabric: A`, and neither uses the
+ * other's capitalisation. Matching case-insensitively through this table is
+ * what lets a field be *read* rather than reported as unknown, without the
+ * importer inventing a meaning for a key it has never seen. A key absent from
+ * this table stays unread and is reported with its value intact.
+ */
+const TEXT_KEY_ALIASES: Record<string, string> = {
+  'piece name': 'Piece Name',
+  'size name': 'Size',
+  size: 'Size',
+  quantity: 'Quantity',
+  rotation: 'Rotation',
+  fabric: 'Fabric',
+  category: 'Category',
+  annotation: 'Annotation',
+  'style name': 'Style Name',
+  'creation date': 'Creation Date',
+  'creation time': 'Creation Time',
+  author: 'Author',
+  'sample size': 'Sample Size',
+  'grade rule table': 'Grade Rule Table',
+  units: 'Units',
+  'curve tolerance': 'Curve Tolerance',
+  'astm/d13proposal 1 version': 'ASTM/D13Proposal 1 Version',
+};
 
 /**
- * Splits `Key:Value` TEXT into a lookup. First occurrence of a key wins —
- * these fields are one-per-scope in practice, and silently letting a later
- * duplicate overwrite an earlier one would hide a malformed file.
+ * Splits `Key:Value` TEXT into a lookup keyed by canonical name. First
+ * occurrence wins — these fields are one-per-scope in practice, and silently
+ * letting a later duplicate overwrite an earlier one would hide a malformed
+ * file. Unrecognised keys come back with their values, so a caller can report
+ * what was in the file rather than merely that something was.
  */
 const parseKeyValueTexts = (
   texts: readonly RawText[],
-): { readonly fields: Map<string, string>; readonly unknownKeys: readonly string[] } => {
+): {
+  readonly fields: Map<string, string>;
+  readonly unknown: ReadonlyMap<string, string>;
+} => {
   const fields = new Map<string, string>();
-  const unknownKeys: string[] = [];
+  const unknown = new Map<string, string>();
   for (const text of texts) {
     const separator = text.value.indexOf(':');
     if (separator <= 0) continue; // '# 0', piece labels, empty strings — not fields
     const key = text.value.slice(0, separator).trim();
     const value = text.value.slice(separator + 1).trim();
-    if (!KNOWN_TEXT_KEYS.has(key)) {
-      if (!unknownKeys.includes(key)) unknownKeys.push(key);
+    const canonical = TEXT_KEY_ALIASES[key.toLowerCase()];
+    if (canonical === undefined) {
+      if (!unknown.has(key)) unknown.set(key, value);
       continue;
     }
-    if (!fields.has(key)) fields.set(key, value);
+    if (!fields.has(canonical)) fields.set(canonical, value);
   }
-  return { fields, unknownKeys };
+  return { fields, unknown };
+};
+
+/**
+ * Reads `Category:` only when it names a category this model actually has.
+ *
+ * A real file puts `CATEGORY: FRONT` here — which is the piece's *role*, not
+ * the shell/lining/interlining/trim distinction `PieceCategory` means. Mapping
+ * one onto the other would put a front panel in the wrong cut bundle, so
+ * anything unrecognised is left alone and reported instead.
+ */
+const PIECE_CATEGORIES: readonly string[] = ['shell', 'lining', 'interlining', 'trim'];
+
+const parseCategory = (raw: string | undefined): PieceCategory | undefined => {
+  if (raw === undefined) return undefined;
+  const lower = raw.trim().toLowerCase();
+  return PIECE_CATEGORIES.includes(lower) ? (lower as PieceCategory) : undefined;
 };
 
 /**
@@ -722,6 +797,70 @@ const parseQuantity = (
 
 /** How close two points must be, in millimetres, to treat them as the same vertex. */
 const VERTEX_EPSILON_MM = 1e-6;
+
+/**
+ * How close, in the file's own units, one polyline's end must be to the next
+ * one's start before they count as the same boundary.
+ *
+ * Deliberately tight. In the real file that motivated this the gap is exactly
+ * zero — every run ends on the coordinate the next one starts from, to the
+ * digit — so this only has to absorb a writer that rounds, not stitch together
+ * runs that merely look close. Anything further apart is left as a separate
+ * polyline and reported, because "these two nearly touch" is a guess about
+ * intent and joining the wrong pair would invent a seam that isn't there.
+ */
+const CHAIN_EPSILON = 1e-6;
+
+interface ChainedBoundary {
+  readonly vertices: readonly Vec2[];
+  /** How many source polylines went into it. 1 means nothing was joined. */
+  readonly joined: number;
+  /** Boundary-layer polylines left over because the chain broke. */
+  readonly unjoined: number;
+}
+
+/**
+ * Joins boundary-layer polylines that are laid out head-to-tail into one ring.
+ *
+ * A real AccuMark export writes a piece outline as a *sequence* of polylines —
+ * one per run between significant points, plus zero-length markers at the
+ * junctions — rather than as a single closed polyline. Taking the first one
+ * and calling it the boundary produces a piece with a tenth of its outline,
+ * which is worse than failing: it looks like a pattern piece.
+ *
+ * Only consecutive runs are joined, in file order, and only where the previous
+ * end and the next start actually coincide. No searching, no reordering, no
+ * reversing: the evidence is that these files already store the runs in order,
+ * and a matcher that hunts for a partner would happily assemble a plausible
+ * ring out of an internal line and a boundary. The moment the chain breaks,
+ * this stops and reports what was left.
+ */
+const chainBoundary = (runs: readonly RawPolyline[]): ChainedBoundary => {
+  const first = runs[0];
+  if (!first) return { vertices: [], joined: 0, unjoined: 0 };
+
+  const vertices: Vec2[] = [...first.vertices];
+  let joined = 1;
+
+  for (let i = 1; i < runs.length; i += 1) {
+    const next = runs[i]!;
+    const end = vertices[vertices.length - 1];
+    const start = next.vertices[0];
+    if (
+      !end ||
+      !start ||
+      Math.abs(end.x - start.x) > CHAIN_EPSILON ||
+      Math.abs(end.y - start.y) > CHAIN_EPSILON
+    ) {
+      return { vertices, joined, unjoined: runs.length - i };
+    }
+    // Drop the shared junction vertex — the next run repeats it by definition.
+    vertices.push(...next.vertices.slice(1));
+    joined += 1;
+  }
+
+  return { vertices, joined, unjoined: 0 };
+};
 
 /**
  * Drops a vertex that repeats the one immediately before it (an export
@@ -772,6 +911,79 @@ const cleanRing = (
   return result;
 };
 
+/**
+ * Matches `# N` grade-rule texts to boundary points **by coordinate**.
+ *
+ * A real AccuMark file writes a `# N` TEXT at each graded point, naming a
+ * `RULE: DELTA N` in the companion .RUL table. Matching them positionally
+ * would be wrong: the file writes 30 such texts against 41 boundary points in
+ * one piece, repeating a rule at a point several times over, so the two lists
+ * are not parallel and never were.
+ *
+ * They *are* placed exactly on the vertex they describe — checked across all
+ * three pieces of the real file, every text landing on a boundary point to the
+ * digit, with no position ever carrying two different rule numbers. So
+ * coordinates are the join, repeats are harmless, and a genuine disagreement
+ * at one position is reported rather than resolved by whichever came last.
+ */
+const ruleNumbersForBoundary = (
+  texts: readonly RawText[],
+  boundaryLayer: string,
+  boundary: readonly Vec2[],
+  toPieceSpace: (v: Vec2) => Vec2,
+  issues: ConversionIssue[],
+  pieceName: string,
+): (number | undefined)[] => {
+  const numbers: (number | undefined)[] = boundary.map(() => undefined);
+  let unmatched = 0;
+  let conflicts = 0;
+
+  for (const text of texts) {
+    if (text.layer !== boundaryLayer) continue;
+    const match = /^#\s*(\d+)$/.exec(text.value.trim());
+    if (!match) continue;
+    const rule = Number(match[1]);
+
+    const at = toPieceSpace(text.position);
+    const index = boundary.findIndex(
+      (p) => Math.abs(p.x - at.x) <= VERTEX_EPSILON_MM && Math.abs(p.y - at.y) <= VERTEX_EPSILON_MM,
+    );
+    if (index === -1) {
+      unmatched += 1;
+      continue;
+    }
+    const existing = numbers[index];
+    if (existing !== undefined && existing !== rule) {
+      conflicts += 1;
+      continue;
+    }
+    numbers[index] = rule;
+  }
+
+  if (unmatched > 0) {
+    issues.push({
+      severity: 'warning',
+      code: 'grade-rule-text-unmatched',
+      message: `"${pieceName}": ${unmatched} "# N" grade-rule text(s) do not sit on any boundary point and were not attached to anything.`,
+    });
+  }
+  if (conflicts > 0) {
+    issues.push({
+      severity: 'warning',
+      code: 'grade-rule-text-conflict',
+      message: `"${pieceName}": ${conflicts} boundary point(s) carry more than one different "# N" rule number. None of the conflicting ones were applied — the first number read at each point stands.`,
+    });
+  }
+
+  return numbers;
+};
+
+/** A POINT marker resolved into piece space, with what its layer says it is. */
+interface ResolvedMarker {
+  readonly concept: PatternConcept;
+  readonly position: Vec2;
+}
+
 interface ResolvedPiece {
   /** The file's own `Piece Name:` when it states one, else the block name. */
   readonly name: string;
@@ -781,9 +993,16 @@ interface ResolvedPiece {
   readonly points: readonly Vec2[];
   /** Straight LINE entities, same space as `points`. Meaning deliberately unclaimed. */
   readonly constructionLines: readonly (readonly [Vec2, Vec2])[];
+  /** POINT markers whose layer maps to a notch / turn point / curve point. */
+  readonly markers: readonly ResolvedMarker[];
+  /** Grade rule number per boundary point, from the `# N` text beside it. */
+  readonly ruleNumbers: readonly (number | undefined)[];
   readonly quantity?: number;
   /** The file's `Size Name:`, when present — recorded, never used to grade. */
   readonly sizeName?: string;
+  readonly fabric?: string;
+  readonly category?: PieceCategory;
+  readonly description?: string;
 }
 
 const resolvePieces = (
@@ -817,23 +1036,19 @@ const resolvePieces = (
       y: -(v.y - block.basePoint.y + insert.insertionPoint.y) * mmPerUnit,
     });
 
-    let boundary = block.polylines.find((p) => p.layer === boundaryLayer);
-    if (!boundary && block.polylines.length > 0) {
-      boundary = block.polylines[0];
+    let boundaryRuns = block.polylines.filter((p) => p.layer === boundaryLayer);
+    let boundaryLayerUsed = boundaryLayer;
+    if (boundaryRuns.length === 0 && block.polylines.length > 0) {
+      const fallback = block.polylines[0]!;
+      boundaryRuns = [fallback];
+      boundaryLayerUsed = fallback.layer;
       issues.push({
         severity: 'warning',
         code: 'boundary-layer-mismatch',
-        message: `"${block.name}": no polyline on the mapped piece-boundary layer ("${boundaryLayer}", unverified — see layerMapping.ts); used its only polyline instead, on layer "${boundary!.layer}".`,
+        message: `"${block.name}": no polyline on the mapped piece-boundary layer ("${boundaryLayer}", unverified — see layerMapping.ts); used its only polyline instead, on layer "${fallback.layer}".`,
       });
     }
-    if (block.polylines.length > 1) {
-      issues.push({
-        severity: 'warning',
-        code: 'extra-polylines-ignored',
-        message: `"${block.name}": ${block.polylines.length} polylines found; only the boundary was imported. Internal lines are not read yet.`,
-      });
-    }
-    if (!boundary) {
+    if (boundaryRuns.length === 0) {
       issues.push({
         severity: 'error',
         code: 'no-boundary-polyline',
@@ -842,7 +1057,31 @@ const resolvePieces = (
       continue;
     }
 
-    const cleaned = cleanRing(boundary.vertices.map(toPieceSpace), issues, block.name);
+    const chain = chainBoundary(boundaryRuns);
+    if (chain.joined > 1) {
+      issues.push({
+        severity: 'info',
+        code: 'boundary-runs-joined',
+        message: `"${block.name}": the outline was written as ${chain.joined} separate polylines on layer "${boundaryLayerUsed}", laid head-to-tail; they were joined into one boundary.`,
+      });
+    }
+    if (chain.unjoined > 0) {
+      issues.push({
+        severity: 'warning',
+        code: 'extra-polylines-ignored',
+        message: `"${block.name}": ${chain.unjoined} polyline(s) on the boundary layer do not continue from the end of the previous one and were left out. They may be a second loop, an internal line on the wrong layer, or a gap in the source outline — none of which this importer will guess between.`,
+      });
+    }
+    const otherPolylines = block.polylines.length - boundaryRuns.length;
+    if (otherPolylines > 0) {
+      issues.push({
+        severity: 'warning',
+        code: 'extra-polylines-ignored',
+        message: `"${block.name}": ${otherPolylines} polyline(s) on other layers were not imported. Internal lines, sew lines and annotation paths are not read yet.`,
+      });
+    }
+
+    const cleaned = cleanRing(chain.vertices.map(toPieceSpace), issues, block.name);
 
     if (cleaned.length < 3) {
       issues.push({
@@ -852,7 +1091,7 @@ const resolvePieces = (
       });
       continue;
     }
-    tally(observations, boundary.layer, 'POLYLINE', 'outline');
+    for (let i = 0; i < chain.joined; i += 1) tally(observations, boundaryLayerUsed, 'POLYLINE', 'outline');
 
     // LINE entities: kept as geometry, with no claim about what they mean.
     // The layer numbers say "grain line" and "grade reference" in the table,
@@ -865,18 +1104,18 @@ const resolvePieces = (
     );
     for (const line of block.lines) tally(observations, line.layer, 'LINE', 'construction');
 
-    const { fields, unknownKeys } = parseKeyValueTexts(block.texts);
+    const { fields, unknown } = parseKeyValueTexts(block.texts);
     for (const text of block.texts) {
       const isField = text.value.indexOf(':') > 0;
       tally(observations, text.layer, 'TEXT', isField ? 'metadata' : 'skipped');
     }
-    if (unknownKeys.length > 0) {
+    if (unknown.size > 0) {
       issues.push({
         severity: 'info',
         code: 'unknown-metadata-field',
-        message: `"${block.name}": text field(s) ${unknownKeys
-          .map((k) => `"${k}"`)
-          .join(', ')} are not fields this importer reads; left alone.`,
+        message: `"${block.name}": text field(s) ${[...unknown]
+          .map(([k, v]) => `"${k}: ${v}"`)
+          .join(', ')} are not fields this importer reads; left in the file untouched.`,
       });
     }
 
@@ -899,13 +1138,72 @@ const resolvePieces = (
       });
     }
 
+    // POINT markers. Only the three layers a real file has actually shown in
+    // use are read, and only into what that layer's binding already claims —
+    // a notch on the notch layer, a marker point on the turn/curve layers.
+    // Every other POINT layer keeps the old behaviour: warned and skipped.
+    const markers: ResolvedMarker[] = [];
+    const unreadPointLayers = new Map<string, number>();
+    for (const point of block.points) {
+      const concept = conceptForLayer(Number(point.layer), flavour);
+      if (concept === 'notch' || concept === 'turn-point' || concept === 'curve-point') {
+        markers.push({ concept, position: toPieceSpace(point.position) });
+        tally(observations, point.layer, 'POINT', concept === 'notch' ? 'notch' : 'marker');
+      } else {
+        unreadPointLayers.set(point.layer, (unreadPointLayers.get(point.layer) ?? 0) + 1);
+        tally(observations, point.layer, 'POINT', 'skipped');
+      }
+    }
+    for (const [layer, count] of unreadPointLayers) {
+      issues.push({
+        severity: 'warning',
+        code: 'unsupported-entity',
+        message: `"${block.name}": ${count} POINT entit${count === 1 ? 'y' : 'ies'} on layer "${layer}" — that layer has no binding this importer reads points for; skipped.`,
+      });
+    }
+
+    const ruleNumbers = ruleNumbersForBoundary(
+      block.texts,
+      boundaryLayerUsed,
+      cleaned,
+      toPieceSpace,
+      issues,
+      block.name,
+    );
+
+    const rawCategory = fields.get('Category');
+    const category = parseCategory(rawCategory);
+    if (rawCategory !== undefined && category === undefined) {
+      issues.push({
+        severity: 'info',
+        code: 'category-not-a-known-category',
+        message: `"${block.name}": "Category: ${rawCategory}" names the piece's role, not one of this model's cut categories (${PIECE_CATEGORIES.join('/')}); kept as the piece description and category left at 'shell'.`,
+      });
+    }
+    // Free text the model has exactly one slot for. Everything the file says
+    // about the piece that is not a modelled field lands here rather than
+    // being dropped, in a stable order.
+    const sizeName = fields.get('Size');
+    const descriptionParts: string[] = [];
+    const annotation = fields.get('Annotation');
+    if (annotation !== undefined) descriptionParts.push(annotation);
+    if (rawCategory !== undefined && category === undefined) {
+      descriptionParts.push(`Category: ${rawCategory}`);
+    }
+    if (sizeName !== undefined) descriptionParts.push(`Size Name: ${sizeName}`);
+
     resolved.push({
       name: fields.get('Piece Name') ?? block.name,
       code: block.name,
       points: cleaned,
       constructionLines,
+      markers,
+      ruleNumbers,
       ...(parsedQuantity.quantity !== undefined ? { quantity: parsedQuantity.quantity } : {}),
-      ...(fields.has('Size Name') ? { sizeName: fields.get('Size Name')! } : {}),
+      ...(sizeName !== undefined ? { sizeName } : {}),
+      ...(fields.has('Fabric') ? { fabric: fields.get('Fabric')! } : {}),
+      ...(category !== undefined ? { category } : {}),
+      ...(descriptionParts.length > 0 ? { description: descriptionParts.join(' · ') } : {}),
     });
   }
 
@@ -925,7 +1223,113 @@ const resolvePieces = (
 
 /* --- Build the pattern document ------------------------------------------ */
 
-const buildPiece = (resolved: ResolvedPiece): PatternPiece => {
+/**
+ * How far, in millimetres, a notch POINT may sit from the boundary and still
+ * be treated as a notch *on* it.
+ *
+ * A notch marks a spot on the seam, so its coordinate should land on the
+ * outline. Real files put it within rounding distance; a point further off
+ * than this is something else — an internal mark, a mis-layered drill — and
+ * snapping it to the nearest seam would silently move it. Half a millimetre
+ * is tight enough that nothing lands here by accident and loose enough to
+ * absorb a writer that rounds to four decimal inches.
+ */
+const NOTCH_SNAP_MM = 0.5;
+
+/**
+ * The depth `addNotch` gives a notch when nothing specifies one. Mirrored here
+ * only so a diagnostic can say the number out loud; `pattern/edit.ts` remains
+ * the one place that decides it.
+ */
+const NOTCH_DEPTH_DEFAULT_MM = 6;
+
+/**
+ * Anchors notch markers to the boundary segment they sit on.
+ *
+ * The model stores a notch as (segment, t) rather than a coordinate — that is
+ * the property that lets it ride reshaping and grading — so an imported point
+ * has to be projected onto its segment. Every boundary segment here is a
+ * straight line, so this is a closest-point-on-segment search and the `t` it
+ * yields is exact rather than approximated.
+ *
+ * Kind, depth, width and angle are *not* in the file. They come from the
+ * app's own documented `addNotch` defaults (a conventional 6 × 2 mm slit), so
+ * the one place that decides what an unspecified notch looks like stays the
+ * one place — this importer does not invent a second convention.
+ */
+const attachNotches = (
+  piece: PatternPiece,
+  markers: readonly ResolvedMarker[],
+  issues: ConversionIssue[],
+): PatternPiece => {
+  const byId = new Map(piece.points.map((p) => [p.id, p.position]));
+  let result = piece;
+  const offBoundary: number[] = [];
+
+  // The file repeats a notch point verbatim in places, the same way it repeats
+  // a `# N` rule text. Two notches at one coordinate is noise, not two marks.
+  const distinct: ResolvedMarker[] = [];
+  for (const marker of markers) {
+    if (marker.concept !== 'notch') continue;
+    const seen = distinct.some(
+      (m) =>
+        Math.abs(m.position.x - marker.position.x) <= VERTEX_EPSILON_MM &&
+        Math.abs(m.position.y - marker.position.y) <= VERTEX_EPSILON_MM,
+    );
+    if (!seen) distinct.push(marker);
+  }
+
+  for (const marker of distinct) {
+
+    let best: { segmentId: SegmentId; t: number; distance: number } | null = null;
+    for (const segmentId of piece.boundary) {
+      const segment = piece.segments.find((s) => s.id === segmentId);
+      if (!segment) continue;
+      const a = byId.get(segment.from);
+      const b = byId.get(segment.to);
+      if (!a || !b) continue;
+
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const lengthSquared = dx * dx + dy * dy;
+      // A zero-length segment has no direction to project onto; its distance
+      // is just the distance to the point, at t = 0.
+      const t =
+        lengthSquared === 0
+          ? 0
+          : Math.min(1, Math.max(0, ((marker.position.x - a.x) * dx + (marker.position.y - a.y) * dy) / lengthSquared));
+      const closest = { x: a.x + dx * t, y: a.y + dy * t };
+      const distance = Math.hypot(marker.position.x - closest.x, marker.position.y - closest.y);
+      if (!best || distance < best.distance) best = { segmentId, t, distance };
+    }
+
+    if (!best || best.distance > NOTCH_SNAP_MM) {
+      offBoundary.push(best?.distance ?? Number.POSITIVE_INFINITY);
+      continue;
+    }
+    const added = addNotch(result, best.segmentId, best.t);
+    if (added) result = added.piece;
+  }
+
+  if (offBoundary.length > 0) {
+    const min = Math.min(...offBoundary);
+    const max = Math.max(...offBoundary);
+    const spread = min.toFixed(2) === max.toFixed(2) ? `${min.toFixed(2)}mm` : `${min.toFixed(2)}–${max.toFixed(2)}mm`;
+    issues.push({
+      severity: 'warning',
+      code: 'notch-marker-off-boundary',
+      pieceId: piece.id,
+      message:
+        `"${piece.name}": ${offBoundary.length} notch-layer point(s) sit ${spread} inside the outline rather than on it, and were not turned into notches. ` +
+        `In the file this was built against they pair one-to-one with the on-seam points at a constant offset, which is what a notch *depth* marker looks like — but the file never says so, and reading a depth off a distance would be a guess. ` +
+        `The notches themselves were placed from the on-seam points, at this app's default ${NOTCH_DEPTH_DEFAULT_MM}mm depth.`,
+    });
+  }
+
+  return result;
+};
+
+const buildPiece = (resolved: ResolvedPiece, issues: ConversionIssue[]): PatternPiece => {
   const pieceId = createId('dxf-piece');
   const points: PiecePoint[] = resolved.points.map((position) => ({
     id: createId(`${pieceId}-p`),
@@ -956,33 +1360,125 @@ const buildPiece = (resolved: ResolvedPiece): PatternPiece => {
     };
   });
 
-  return {
+  // Turn/curve POINT markers become `construction` points: their position is
+  // exactly what the file states, and `construction` keeps them off the
+  // outline, which is already complete. Labelled so the role the layer claims
+  // survives into the document rather than being flattened to "a point".
+  for (const marker of resolved.markers) {
+    if (marker.concept === 'notch') continue;
+    points.push({
+      id: createId(`${pieceId}-p`),
+      position: marker.position,
+      role: 'construction',
+      label: marker.concept === 'turn-point' ? 'Turn point' : 'Curve point',
+    });
+  }
+
+  const piece: PatternPiece = {
     id: pieceId,
     name: resolved.name,
     points,
     segments,
     boundary: segments.map((s) => s.id),
     closed: true,
-    // No allowance signal exists in either fixture's data (a plain boundary
-    // polyline, no seam-line layer used) — 0 is the honest "net line only"
-    // reading, not a placeholder; see the 'no-seam-allowance-source' issue.
+    // No allowance signal exists in any fixture's data (a boundary polyline,
+    // no seam-line layer read) — 0 is the honest "net line only" reading, not
+    // a placeholder; see the 'no-seam-allowance-source' issue.
     seamAllowance: 0,
     notches: [],
     internalLines,
     meta: {
       code: resolved.code,
-      // Category and fabric have no source in either file; 'shell' and ''
-      // are the least-assuming defaults and are flagged, not presented as
-      // read. Quantity is different — a file that states `Quantity:` gets
-      // its own value, and only a file that doesn't falls back to 1.
-      category: 'shell',
-      fabric: '',
+      // Defaults where the file says nothing, and are flagged as defaults
+      // rather than presented as read. A file that *does* state a value —
+      // quantity, fabric, a real cut category — gets its own.
+      category: resolved.category ?? 'shell',
+      fabric: resolved.fabric ?? '',
       quantity: resolved.quantity ?? 1,
       onFold: false,
       mirrored: false,
-      ...(resolved.sizeName !== undefined ? { description: `Size Name: ${resolved.sizeName}` } : {}),
+      ...(resolved.description !== undefined ? { description: resolved.description } : {}),
     },
   };
+
+  return attachNotches(piece, resolved.markers, issues);
+};
+
+/**
+ * Attaches a companion rule table's grading to already-built geometry.
+ *
+ * Kept as a separate pass, after the pieces exist, for a reason: grading here
+ * is *association*, not construction. Each boundary point already carries the
+ * rule number the DXF wrote beside it; this resolves those numbers against the
+ * table and sets `gradeRuleId`. No coordinate moves. If the table is missing,
+ * unreadable, or names rules the geometry never references, the geometry is
+ * returned exactly as it came in and the mismatch is reported.
+ */
+const applyRuleTable = (
+  pieces: readonly PatternPiece[],
+  resolved: readonly ResolvedPiece[],
+  payload: string | undefined,
+  issues: ConversionIssue[],
+): {
+  readonly pieces: readonly PatternPiece[];
+  readonly rules: readonly GradeRule[];
+  readonly sizeRange: SizeRange | null;
+} => {
+  const referenced = new Set<number>();
+  for (const piece of resolved) {
+    for (const number of piece.ruleNumbers) if (number !== undefined) referenced.add(number);
+  }
+
+  if (payload === undefined) {
+    if (referenced.size > 0) {
+      issues.push({
+        severity: 'warning',
+        code: 'grade-rules-not-resolved',
+        message: `${referenced.size} grade rule number(s) are marked on the geometry, but no companion .RUL rule table was supplied, so none could be resolved. The numbers alone say which points grade together, not by how much — import the style's .RUL alongside the DXF to get the actual grading.`,
+      });
+    }
+    return { pieces, rules: [], sizeRange: null };
+  }
+
+  const table = parseRuleTable(payload);
+  issues.push(...table.issues);
+  if (table.rules.length === 0) return { pieces, rules: [], sizeRange: null };
+
+  const missing = [...referenced].filter((n) => !table.byNumber.has(n)).sort((a, b) => a - b);
+  if (missing.length > 0) {
+    issues.push({
+      severity: 'warning',
+      code: 'grade-rule-missing-from-table',
+      message: `The geometry references rule(s) ${missing.join(', ')}, which the companion rule table does not define. Points carrying them were left ungraded rather than attached to a neighbouring rule.`,
+    });
+  }
+
+  // `resolved[i]` built `pieces[i]`, and its boundary points are the first
+  // `resolved[i].points.length` entries of that piece — construction points
+  // are appended after. That ordering is `buildPiece`'s, right above.
+  const graded = pieces.map((piece, i) => {
+    const numbers = resolved[i]?.ruleNumbers ?? [];
+    if (numbers.every((n) => n === undefined)) return piece;
+    return {
+      ...piece,
+      points: piece.points.map((point, j) => {
+        const rule = numbers[j] === undefined ? undefined : table.byNumber.get(numbers[j]!);
+        return rule ? { ...point, gradeRuleId: rule.id } : point;
+      }),
+    };
+  });
+
+  const attached = graded.reduce(
+    (sum, piece) => sum + piece.points.filter((p) => p.gradeRuleId !== undefined).length,
+    0,
+  );
+  issues.push({
+    severity: 'info',
+    code: 'grade-rules-attached',
+    message: `${attached} point(s) across ${graded.length} piece(s) were linked to grade rules from the companion table.`,
+  });
+
+  return { pieces: graded, rules: table.rules, sizeRange: table.sizeRange };
 };
 
 const nowIso = (): string => new Date().toISOString();
@@ -1039,11 +1535,18 @@ export const importDxfWithDiagnostics = (
   }
 
   const unverified = unverifiedBindings(options.flavour);
+  const allBindings = layerMapFor(options.flavour);
+  const bindingCount = allBindings.length;
+  const observedCount = allBindings.filter((b) => (b.observedInFixtures?.length ?? 0) > 0).length;
+  const contradictedCount = allBindings.filter((b) => (b.conflictingEvidence?.length ?? 0) > 0).length;
+  const untestedCount = allBindings.filter(
+    (b) => (b.observedInFixtures?.length ?? 0) === 0 && (b.conflictingEvidence?.length ?? 0) === 0,
+  ).length;
   if (unverified.length > 0) {
     issues.push({
       severity: 'warning',
       code: 'unverified-layer-map',
-      message: `${unverified.length} of ${layerMapFor(options.flavour).length} layer binding(s) are unverified against ASTM D6673. Only piece-boundary has real-file evidence behind it (two files, both agreeing), and real files actively contradict the table on three other layers. Review any concept beyond the outline before cutting from this import.`,
+      message: `${unverified.length} of ${bindingCount} layer binding(s) are unverified against ASTM D6673: ${observedCount} have real-file evidence behind them, ${contradictedCount} are actively contradicted by a real file, and ${untestedCount} have never been exercised. Review any concept beyond the outline before cutting from this import.`,
     });
   }
 
@@ -1051,17 +1554,17 @@ export const importDxfWithDiagnostics = (
 
   // Style-wide metadata lives as loose TEXT in ENTITIES in at least one real
   // writer's output. Read before units, because `Units:` is one of the fields.
-  const { fields: styleFields, unknownKeys: unknownStyleKeys } = parseKeyValueTexts(parsed.styleTexts);
+  const { fields: styleFields, unknown: unknownStyleFields } = parseKeyValueTexts(parsed.styleTexts);
   for (const text of parsed.styleTexts) {
     tally(observations, text.layer, 'TEXT', text.value.indexOf(':') > 0 ? 'metadata' : 'skipped');
   }
-  if (unknownStyleKeys.length > 0) {
+  if (unknownStyleFields.size > 0) {
     issues.push({
       severity: 'info',
       code: 'unknown-metadata-field',
-      message: `Style-level text field(s) ${unknownStyleKeys
-        .map((k) => `"${k}"`)
-        .join(', ')} are not fields this importer reads; left alone.`,
+      message: `Style-level text field(s) ${[...unknownStyleFields]
+        .map(([k, v]) => `"${k}: ${v}"`)
+        .join(', ')} are not fields this importer reads; left in the file untouched.`,
     });
   }
 
@@ -1075,7 +1578,7 @@ export const importDxfWithDiagnostics = (
     observations,
   );
 
-  const pieces = resolvedPieces.map(buildPiece);
+  const pieces = resolvedPieces.map((piece) => buildPiece(piece, issues));
 
   reportLayerUsage([...observations.values()], options.flavour, issues);
 
@@ -1090,16 +1593,22 @@ export const importDxfWithDiagnostics = (
     });
   }
 
-  // Only claim the metadata gap when there actually is one. A file that
-  // states its own quantity should not be told it defaulted to ×1.
-  const quantityRead = resolvedPieces.some((p) => p.quantity !== undefined);
-  issues.push({
-    severity: 'warning',
-    code: 'metadata-not-in-source',
-    message: quantityRead
-      ? `Fabric and category have no source in this file; every piece defaulted to 'shell' / ''. Cut quantity was read from the file. Review before this goes to a cutting room.`
-      : `Fabric, category and quantity have no source in this file; every piece defaulted to 'shell' / '' / ×1. Review before this goes to a cutting room.`,
-  });
+  // Only claim the gaps that are actually gaps. Three real writers default
+  // different fields, so this is assembled from what was read rather than
+  // asserted — telling someone their fabric defaulted when the file states it
+  // is the kind of wrong that stops the warning being read at all.
+  const defaulted = [
+    resolvedPieces.some((p) => p.category !== undefined) ? null : 'category',
+    resolvedPieces.some((p) => p.fabric !== undefined) ? null : 'fabric',
+    resolvedPieces.some((p) => p.quantity !== undefined) ? null : 'cut quantity',
+  ].filter((f): f is string => f !== null);
+  if (defaulted.length > 0) {
+    issues.push({
+      severity: 'warning',
+      code: 'metadata-not-in-source',
+      message: `${defaulted.join(', ')} ${defaulted.length === 1 ? 'has' : 'have'} no source in this file; every piece took this app's default. Review before this goes to a cutting room.`,
+    });
+  }
 
   // A marker/graded file repeats the same piece once per size. Importing them
   // as flat, separate pieces is what the file literally contains; building a
@@ -1122,6 +1631,11 @@ export const importDxfWithDiagnostics = (
     });
   }
 
+  // Companion rule table, when the caller supplied one. Everything above runs
+  // identically whether or not it is present — grading is attached to finished
+  // geometry, never used to reshape it.
+  const grading = applyRuleTable(pieces, resolvedPieces, options.ruleTable, issues);
+
   const styleName = styleFields.get('Style Name');
   const document: PatternDocument = {
     schemaVersion: PATTERN_SCHEMA_VERSION,
@@ -1129,10 +1643,13 @@ export const importDxfWithDiagnostics = (
     name: styleName ?? 'Imported pattern',
     style: { code: styleName ?? '', name: styleName ?? 'Imported pattern' },
     unit: 'mm',
-    sizeRange: { baseSizeId: 'size-base', sizes: [{ id: 'size-base', label: 'Base', order: 0 }] },
-    pieces,
+    sizeRange: grading.sizeRange ?? {
+      baseSizeId: 'size-base',
+      sizes: [{ id: 'size-base', label: 'Base', order: 0 }],
+    },
+    pieces: grading.pieces,
     measurements: [],
-    gradeRules: [],
+    gradeRules: grading.rules,
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };

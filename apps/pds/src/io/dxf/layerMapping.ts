@@ -15,14 +15,27 @@ import type { DxfFlavour } from './types';
  * vendors differ in the optional ranges. Shipping a converter on unverified
  * layer numbers silently corrupts customer patterns.
  *
- * Two real files have now been read against this table, and they disagree
- * with it in three places (`conflictingEvidence` below): layers 5 and 15 hold
- * entity kinds this table does not list, and layer 1 holds TEXT as well as
- * the boundary polyline it does list. That is worth more than it looks —
- * "unverified" was a suspicion before, and is now a measurement. Nothing has
- * been renumbered in response: one writer's habits are not the standard, and
- * a table edited to match whichever file arrived most recently is worse than
- * one that is honestly wrong in a documented way.
+ * Three real files from three writers have now been read against this table,
+ * and the result is neither "it was right" nor "it was wrong" — it is both,
+ * per binding, and now recorded per binding:
+ *
+ *   observed      — a real file uses this layer for this entity kind. Six do:
+ *                   piece-boundary, turn-point, curve-point, notch,
+ *                   mirror-line, grain-line.
+ *   contradicted  — a real file puts something else there. Four do:
+ *                   grade-reference, drill-hole, stripe-reference, sew-line
+ *                   (and piece-boundary, which is *both* — layer 1 carries the
+ *                   boundary and that writer's metadata text).
+ *   untested      — no real file has touched it: internal-line, annotation.
+ *
+ * The strongest single result is layer 5: two unrelated writers put a LINE
+ * where this table expects a POINT. One file disagreeing is a vendor quirk;
+ * two, independently, is the table being wrong. It has still not been
+ * renumbered — that is a change the standard should settle, not a majority
+ * vote of whichever files happen to be on hand — but it is no longer a
+ * suspicion, and `import.ts` reports it on every import.
+ *
+ * `npm run report:dxf` prints this table's evidence state per concept.
  *
  * TODO(dxf): verify every binding against ASTM D6673 and against files exported
  * by AccuMark, Optitex and Lectra, flipping `verified` one at a time. This is
@@ -95,7 +108,7 @@ const BASE_BINDINGS: readonly LayerBinding[] = [
     // binding already claimed. That is the strongest evidence any binding
     // here has, and it is still not the standard.
     verified: false,
-    observedInFixtures: ['5109s-sp27-pattern.dxf', 'tshirt-demo-aama.dxf'],
+    observedInFixtures: ['5109s-sp27-pattern.dxf', 'tshirt-demo-aama.dxf', '8178v-accumark.dxf'],
     // …and yet the same file also puts its metadata TEXT on layer 1, which
     // this binding does not allow for. Layer 1 is evidently "the piece's own
     // layer" in that writer's output, not "the boundary polyline's layer".
@@ -107,6 +120,10 @@ const BASE_BINDINGS: readonly LayerBinding[] = [
     label: 'Turn points (corners)',
     entities: ['POINT'],
     verified: false,
+    // A real AccuMark export puts POINT entities here, exactly as claimed —
+    // 131 of them across three pieces. Entity kind and layer both confirmed;
+    // that they mean *turn points* specifically is still the table's word.
+    observedInFixtures: ['8178v-accumark.dxf'],
   },
   {
     concept: 'curve-point',
@@ -114,6 +131,7 @@ const BASE_BINDINGS: readonly LayerBinding[] = [
     label: 'Curve points',
     entities: ['POINT'],
     verified: false,
+    observedInFixtures: ['8178v-accumark.dxf'],
   },
   {
     concept: 'notch',
@@ -121,7 +139,14 @@ const BASE_BINDINGS: readonly LayerBinding[] = [
     label: 'Notches',
     entities: ['POINT', 'POLYLINE'],
     verified: false,
-    note: 'Some writers split V-notch and slit notch across two layers.',
+    // The first binding beyond the outline to be confirmed by real geometry
+    // rather than by entity kind alone: layer-4 POINTs in a real file land
+    // exactly *on* the outline (0.000mm), which is what a notch is. They come
+    // paired with a second POINT a constant 7mm inside — plausibly the notch
+    // depth, but the file never says so, so `import.ts` reads the on-seam
+    // point as the notch and reports the other rather than inferring a depth.
+    observedInFixtures: ['8178v-accumark.dxf'],
+    note: 'Some writers split V-notch and slit notch across two layers. One real file pairs each on-seam POINT with a second 7mm inside; the pair\'s meaning is unconfirmed.',
   },
   {
     concept: 'grade-reference',
@@ -135,7 +160,10 @@ const BASE_BINDINGS: readonly LayerBinding[] = [
     // the reason `import.ts` will not read a grain line off a layer number:
     // layer 7 (which the table calls grain) carries a similar LINE in the
     // same file, and nothing available distinguishes the two.
-    conflictingEvidence: ['tshirt-demo-aama.dxf: LINE on layer 5, one per piece'],
+    conflictingEvidence: [
+      'tshirt-demo-aama.dxf: LINE on layer 5, one per piece',
+      '8178v-accumark.dxf: LINE on layer 5, one per piece',
+    ],
   },
   {
     concept: 'mirror-line',
@@ -143,6 +171,7 @@ const BASE_BINDINGS: readonly LayerBinding[] = [
     label: 'Mirror / fold line',
     entities: ['LINE'],
     verified: false,
+    observedInFixtures: ['8178v-accumark.dxf'],
   },
   {
     concept: 'grain-line',
@@ -156,8 +185,8 @@ const BASE_BINDINGS: readonly LayerBinding[] = [
     // grain-shaped LINE on layer 5, and picking the wrong one means a
     // garment cut off-grain. `import.ts` keeps both as unclaimed
     // construction geometry until something settles which is which.
-    observedInFixtures: ['tshirt-demo-aama.dxf'],
-    note: 'Entity kind matches a real file; the concept behind it is still unconfirmed.',
+    observedInFixtures: ['tshirt-demo-aama.dxf', '8178v-accumark.dxf'],
+    note: 'Entity kind matches two real files from different writers; the concept behind it is still unconfirmed.',
   },
   {
     concept: 'drill-hole',
@@ -165,6 +194,9 @@ const BASE_BINDINGS: readonly LayerBinding[] = [
     label: 'Drill holes',
     entities: ['POINT'],
     verified: false,
+    // A real file uses layer 8 for LINE, POLYLINE and TEXT — everything
+    // except the POINT this binding expects.
+    conflictingEvidence: ['8178v-accumark.dxf: LINE/POLYLINE/TEXT on layer 8, no POINT'],
   },
   {
     concept: 'internal-line',
@@ -186,6 +218,7 @@ const BASE_BINDINGS: readonly LayerBinding[] = [
     label: 'Stripe / plaid reference',
     entities: ['LINE', 'POINT'],
     verified: false,
+    conflictingEvidence: ['8178v-accumark.dxf: POLYLINE/TEXT on layer 14, carrying their own "# N" rule numbers'],
   },
   {
     concept: 'sew-line',

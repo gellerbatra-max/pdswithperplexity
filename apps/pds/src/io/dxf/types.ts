@@ -37,6 +37,14 @@ export interface DxfImportOptions {
   readonly assumeUnit?: Unit;
   /** Treat unknown layer numbers as an error rather than skipping them. */
   readonly strict?: boolean;
+  /**
+   * Contents of the companion `.RUL` grade rule table, when the caller has
+   * one. An AccuMark style ships as a pair: the DXF marks each graded point
+   * with a `# N` text and this file says what `N` displaces by. Absent, the
+   * import behaves exactly as it does without grading — the geometry is the
+   * same either way, and no rules are invented from the `# N` marks alone.
+   */
+  readonly ruleTable?: string;
 }
 
 export interface DxfExportOptions {

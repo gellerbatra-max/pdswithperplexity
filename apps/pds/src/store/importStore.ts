@@ -43,10 +43,13 @@ export interface ImportState {
   session: ImportSession | null;
   dialogOpen: boolean;
 
-  /** Opens the browser's file picker; hands the chosen file to `beginImport`. */
+  /** Opens the browser's file picker; hands the chosen file(s) to `beginImport`. */
   pickDxfFile: () => void;
-  /** Parses `payload` into a reviewing (or failed) session and opens the dialog. */
-  beginImport: (fileName: string, payload: string) => void;
+  /**
+   * Parses `payload` into a reviewing (or failed) session and opens the dialog.
+   * `ruleTable` is the companion `.RUL` text when the user picked one too.
+   */
+  beginImport: (fileName: string, payload: string, ruleTable?: string) => void;
   /** Replaces the open document with the session's. Reviewing sessions only. */
   applySession: () => void;
   /** Drops the session entirely. */
@@ -84,21 +87,38 @@ export const useImportStore = create<ImportState>((set, get) => ({
     activeInput?.remove();
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.dxf';
+    // An AccuMark style is a *pair*: the DXF holds the geometry and marks each
+    // graded point with a rule number, the .RUL says what those numbers mean.
+    // Selecting both together is the only way to import the grading, so the
+    // picker accepts both and pairs them rather than making it two trips.
+    input.accept = '.dxf,.rul';
+    input.multiple = true;
     input.style.display = 'none';
     input.dataset.role = 'dxf-import-input';
     input.addEventListener('change', () => {
-      const file = input.files?.[0];
+      const chosen = [...(input.files ?? [])];
       input.remove();
       if (activeInput === input) activeInput = null;
-      if (!file) return;
-      void file
-        .text()
-        .then((payload) => get().beginImport(file.name, payload))
+      if (chosen.length === 0) return;
+
+      const isRul = (name: string): boolean => name.toLowerCase().endsWith('.rul');
+      const dxf = chosen.find((f) => !isRul(f.name));
+      if (!dxf) {
+        useUiStore.getState().notify('Pick a .dxf file — a .rul rule table on its own has no geometry to grade.');
+        return;
+      }
+      // Pair by basename when there is a choice; a lone .RUL beside a lone
+      // DXF is unambiguous even when the names differ.
+      const stem = dxf.name.replace(/\.[^.]+$/, '').toLowerCase();
+      const ruls = chosen.filter((f) => isRul(f.name));
+      const rul = ruls.find((f) => f.name.replace(/\.[^.]+$/, '').toLowerCase() === stem) ?? (ruls.length === 1 ? ruls[0] : undefined);
+
+      void Promise.all([dxf.text(), rul ? rul.text() : Promise.resolve(undefined)])
+        .then(([payload, ruleTable]) => get().beginImport(dxf.name, payload, ruleTable))
         .catch((error: unknown) => {
           useUiStore
             .getState()
-            .notify(`Could not read ${file.name}: ${error instanceof Error ? error.message : String(error)}`);
+            .notify(`Could not read ${dxf.name}: ${error instanceof Error ? error.message : String(error)}`);
         });
     });
     document.body.append(input);
@@ -106,13 +126,14 @@ export const useImportStore = create<ImportState>((set, get) => ({
     input.click();
   },
 
-  beginImport: (fileName, payload) => {
+  beginImport: (fileName, payload, ruleTable) => {
     const flavourLabel = Dxf.DXF_FLAVOUR_LABEL[IMPORT_FLAVOUR];
     const importedAt = new Date().toISOString();
     try {
       const { document, issues, layers } = Dxf.importDxfWithDiagnostics(payload, {
         ...Dxf.DEFAULT_IMPORT_OPTIONS,
         flavour: IMPORT_FLAVOUR,
+        ...(ruleTable !== undefined ? { ruleTable } : {}),
       });
       set({
         session: { fileName, flavourLabel, status: 'reviewing', document, issues, layers, error: null, importedAt },

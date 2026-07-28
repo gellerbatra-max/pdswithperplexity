@@ -37,6 +37,8 @@ export const aamaAdapter = dxfAdapter('dxf-aama', 'DXF (AAMA)', 'aama');
 export const astmAdapter = dxfAdapter('astm', 'DXF (ASTM)', 'astm');
 
 export { importDxf, importDxfWithDiagnostics, describeImportPlan, TREATMENT_LABEL } from './import';
+export { parseRuleTable } from './ruleTable';
+export type { ParsedRuleTable } from './ruleTable';
 export type {
   ImportPlan,
   ImportPlanStep,

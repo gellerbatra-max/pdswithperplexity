@@ -28,6 +28,8 @@ const SEVERITY_LABEL: Record<Severity, string> = {
 const TREATMENT_BADGE: Record<Dxf.LayerTreatment, string> = {
   outline: 'outline',
   construction: 'kept, unclaimed',
+  notch: 'notches',
+  marker: 'markers',
   metadata: 'metadata',
   skipped: 'skipped',
 };
@@ -120,6 +122,9 @@ const Dialog = () => {
   const pieces = session.document?.pieces.length ?? 0;
   const internalLines =
     session.document?.pieces.reduce((sum, piece) => sum + piece.internalLines.length, 0) ?? 0;
+  const notches = session.document?.pieces.reduce((sum, piece) => sum + piece.notches.length, 0) ?? 0;
+  const gradeRules = session.document?.gradeRules.length ?? 0;
+  const sizes = session.document?.sizeRange.sizes ?? [];
 
   return (
     <div className="palette-scrim" role="presentation" onClick={closeDialog}>
@@ -172,11 +177,19 @@ const Dialog = () => {
                 <h3>What would be imported</h3>
                 <p className="import-dialog__summary">
                   {pieces} piece{pieces === 1 ? '' : 's'}
+                  {notches > 0 ? `, ${notches} notch${notches === 1 ? '' : 'es'}` : ''}
                   {internalLines > 0
                     ? `, ${internalLines} construction line${internalLines === 1 ? '' : 's'} (kept as geometry, meaning unclaimed)`
                     : ''}
                   {session.document ? ` — style “${session.document.name}”` : ''}
                 </p>
+                {gradeRules > 0 ? (
+                  <p className="import-dialog__summary">
+                    {gradeRules} grade rule{gradeRules === 1 ? '' : 's'} over {sizes.length} size
+                    {sizes.length === 1 ? '' : 's'} ({sizes.map((s) => s.label).join(', ')}), read from the
+                    companion rule table.
+                  </p>
+                ) : null}
               </section>
 
               <section className="import-dialog__section">
