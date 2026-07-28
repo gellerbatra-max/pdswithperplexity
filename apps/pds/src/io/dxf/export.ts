@@ -59,8 +59,8 @@ import { DXF_FLAVOUR_LABEL } from './types';
  *
  * ## What it emits
  *
- * R12-compatible ASCII DXF — HEADER with `$INSUNITS`, BLOCKS with one BLOCK
- * per piece, ENTITIES with one INSERT per piece. R12 because every apparel
+ * R12-compatible ASCII DXF — HEADER with `$INSUNITS` and the drawing extents,
+ * BLOCKS with one BLOCK per piece, ENTITIES with one INSERT per piece. R12 because every apparel
  * file this project has read is R12 or close to it (`AC1009` dominates the
  * 125-file survey), and because it is the dialect with the widest reader
  * support in pattern CAD.
@@ -105,12 +105,49 @@ const pair = (code: number, value: string | number): readonly [string, string] =
   typeof value === 'number' ? number(value) : value,
 ];
 
+/**
+ * The drawing extents, accumulated as geometry is written.
+ *
+ * Mutable and shared, deliberately: every function that emits a coordinate
+ * folds it in here, so `$EXTMIN`/`$EXTMAX` are a *record of what was written*
+ * rather than a second computation that could drift from it. A parallel
+ * "compute the bounds" pass over the document would be the version that goes
+ * stale the first time the writer's geometry changes.
+ */
+interface Extents {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  /** Coordinates folded in. Zero means there is nothing to declare. */
+  count: number;
+}
+
+const emptyExtents = (): Extents => ({
+  minX: Infinity,
+  minY: Infinity,
+  maxX: -Infinity,
+  maxY: -Infinity,
+  count: 0,
+});
+
+/** Folds one already-in-file-space coordinate into the extents. */
+const extend = (extents: Extents, point: Vec2): void => {
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return;
+  extents.minX = Math.min(extents.minX, point.x);
+  extents.minY = Math.min(extents.minY, point.y);
+  extents.maxX = Math.max(extents.maxX, point.x);
+  extents.maxY = Math.max(extents.maxY, point.y);
+  extents.count += 1;
+};
+
 interface WriteContext {
   /** Millimetres per output unit — geometry is held in mm and divided by this. */
   readonly perUnit: number;
   readonly boundaryLayer: string;
   readonly notchLayer: string;
   readonly issues: ConversionIssue[];
+  readonly extents: Extents;
 }
 
 /**
@@ -135,6 +172,18 @@ const boundaryVertices = (
     const from = findPoint(piece, segment.from);
     const to = findPoint(piece, segment.to);
     if (!from || !to) continue; // validateForExport already errored on this
+
+    /*
+     * Extents come from the flattened *curve*, not from the vertices that
+     * describe it. A bulged segment bows outside its own endpoints — a
+     * semicircle by its full radius — so a bounding box taken from vertices
+     * alone would declare an area the drawing spills out of. `flattenSegment`
+     * samples points that lie on the curve, so the box contains it to within
+     * `FLATTEN_TOLERANCE_MM`; a line yields just its two ends.
+     */
+    for (const point of flattenSegment(from.position, to.position, segment.geometry, FLATTEN_TOLERANCE_MM)) {
+      extend(context.extents, toFile(point));
+    }
 
     if (segment.geometry.kind === 'cubic') {
       // No cubic in this DXF profile. Flatten to the documented tolerance and
@@ -246,6 +295,9 @@ const writeNotches = (
   const rows: (readonly [string, string])[] = [];
   for (const { at } of placed) {
     const file = toFile(at);
+    // A notch POINT is written geometry, so it counts toward the extents —
+    // even though it always sits on a boundary already folded in.
+    extend(context.extents, file);
     rows.push(pair(0, 'POINT'), pair(8, layer), pair(10, file.x), pair(20, file.y), pair(30, 0));
   }
   return rows;
@@ -344,6 +396,7 @@ export const exportDxfWithDiagnostics = (
     boundaryLayer,
     notchLayer: String(layerForConcept('notch', options.flavour) ?? 4),
     issues,
+    extents: emptyExtents(),
   };
 
   if (options.includeSeamAllowance) {
@@ -361,6 +414,45 @@ export const exportDxfWithDiagnostics = (
     });
   }
 
+  /*
+   * Blocks are built before the header, because the header describes them.
+   * `$EXTMIN`/`$EXTMAX` are the bounding box of what was actually written,
+   * and the only way to be sure of that is to write it first and read the
+   * accumulator afterwards.
+   */
+  const blockRows: (readonly [string, string])[] = [];
+  for (const piece of document.pieces) {
+    reportDroppedConcepts(piece, issues);
+    blockRows.push(...writeBlock(piece, context));
+  }
+
+  const { extents } = context;
+  const extentRows: (readonly [string, string])[] =
+    extents.count > 0
+      ? [
+          pair(9, '$EXTMIN'),
+          pair(10, extents.minX),
+          pair(20, extents.minY),
+          pair(30, 0),
+          pair(9, '$EXTMAX'),
+          pair(10, extents.maxX),
+          pair(20, extents.maxY),
+          pair(30, 0),
+        ]
+      : [];
+
+  if (extents.count === 0) {
+    // No coordinate was written, so there is no extent to declare. Emitting
+    // 0,0 to 0,0 would be a claim about a drawing that does not exist, and a
+    // reader zooming to it would frame empty space.
+    issues.push({
+      severity: 'warning',
+      code: 'export-no-extents',
+      message:
+        'No geometry was written, so $EXTMIN and $EXTMAX were left out of the header rather than declared as an empty box at the origin. A reader will fall back to its own framing.',
+    });
+  }
+
   const rows: (readonly [string, string])[] = [
     // Plain ASCII, deliberately: R12 has no encoding declaration, so any
     // multi-byte character in a file this writer controls is a guess about
@@ -373,15 +465,12 @@ export const exportDxfWithDiagnostics = (
     pair(1, 'AC1009'),
     pair(9, '$INSUNITS'),
     pair(70, String(INSUNITS_CODE[options.unit] ?? 4)),
+    ...extentRows,
     pair(0, 'ENDSEC'),
     pair(0, 'SECTION'),
     pair(2, 'BLOCKS'),
+    ...blockRows,
   ];
-
-  for (const piece of document.pieces) {
-    reportDroppedConcepts(piece, issues);
-    rows.push(...writeBlock(piece, context));
-  }
 
   rows.push(pair(0, 'ENDSEC'), pair(0, 'SECTION'), pair(2, 'ENTITIES'));
   for (const piece of document.pieces) {

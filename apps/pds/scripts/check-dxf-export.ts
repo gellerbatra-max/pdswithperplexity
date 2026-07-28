@@ -376,12 +376,17 @@ for (const name of FIXTURES) {
   // boundary is written. Compared on the file body, since the header comment
   // legitimately changed to describe the new capability.
   const body = (t: string): string => t.slice(t.indexOf('0\r\nSECTION'));
+  /** BLOCKS onward: every coordinate the writer emits, no header. */
+  const geometrySections = (t: string): string => t.slice(t.indexOf('2\r\nBLOCKS'));
   check(
-    'a notch-free document exports a byte-identical body to a boundary-only writer',
-    // 3364 bytes / sha 56e061d3fbb37e5b before notch export existed, measured
-    // directly against the previous commit rather than asserted.
-    body(plain).length === 3364,
-    `${body(plain).length} bytes`,
+    // Pinned on the geometry sections rather than the whole body: the header
+    // legitimately grows as the writer learns to declare more about itself
+    // (extents landed after this test was written), and a byte count that
+    // includes it would fail for the wrong reason. 3273 bytes, measured
+    // against the commit before notch export existed.
+    'a notch-free document writes byte-identical geometry to a boundary-only writer',
+    geometrySections(plain).length === 3273,
+    `${geometrySections(plain).length} bytes`,
   );
   check(
     'the POLYLINE section of a notched piece is unchanged by its notches',
@@ -464,6 +469,142 @@ for (const name of FIXTURES) {
     })(),
     'order-independent',
   );
+}
+
+/* --- 10. Drawing extents ($EXTMIN / $EXTMAX) --------------------------------
+ *
+ * The bounding box of what was actually written, accumulated during the write
+ * rather than computed alongside it — a parallel pass is the version that goes
+ * stale the first time the writer's geometry changes.
+ *
+ * The case that separates a correct implementation from a plausible one is a
+ * bulged segment: an arc bows outside its own endpoints, so a box taken from
+ * vertices alone declares an area the drawing spills out of.
+ */
+
+{
+  /** Reads a header variable's 10/20 pair back out of written DXF. */
+  const headerPoint = (text: string, name: string): { x: number; y: number } | null => {
+    const at = text.indexOf(`\r\n9\r\n${name}\r\n`);
+    if (at < 0) return null;
+    const lines = text.slice(at + 2).split('\r\n');
+    // 9, NAME, 10, x, 20, y, 30, z
+    return { x: Number(lines[3]), y: Number(lines[5]) };
+  };
+
+  /** The bounds of every coordinate the file actually contains. */
+  const writtenBounds = (text: string) => {
+    const lines = text.split('\r\n');
+    const xs: number[] = [];
+    const ys: number[] = [];
+    // Only VERTEX and POINT entities carry drawing coordinates; BLOCK base
+    // points and INSERT positions are all origin and would not move the box,
+    // but they are skipped explicitly rather than relied on to be harmless.
+    for (let i = 0; i < lines.length - 1; i += 2) {
+      if (lines[i] !== '0') continue;
+      if (lines[i + 1] !== 'VERTEX' && lines[i + 1] !== 'POINT') continue;
+      for (let j = i + 2; j + 1 < lines.length && lines[j] !== '0'; j += 2) {
+        if (lines[j] === '10') xs.push(Number(lines[j + 1]));
+        if (lines[j] === '20') ys.push(Number(lines[j + 1]));
+      }
+    }
+    return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
+  };
+
+  for (const name of FIXTURES) {
+    const doc = importDoc(load(name));
+    const text = exportDxf(doc, OPTIONS);
+    const min = headerPoint(text, '$EXTMIN');
+    const max = headerPoint(text, '$EXTMAX');
+
+    check(`${name}: $EXTMIN and $EXTMAX are written`, min !== null && max !== null, `${JSON.stringify(min)} / ${JSON.stringify(max)}`);
+    if (!min || !max) continue;
+
+    // Every fixture is straight-line geometry, so the written vertices are
+    // the drawing and the box must match them exactly.
+    const actual = writtenBounds(text);
+    check(
+      `${name}: the extents match the bounds of the geometry actually written`,
+      Math.abs(min.x - actual.minX) < 1e-6 &&
+        Math.abs(min.y - actual.minY) < 1e-6 &&
+        Math.abs(max.x - actual.maxX) < 1e-6 &&
+        Math.abs(max.y - actual.maxY) < 1e-6,
+      `header ${min.x},${min.y}..${max.x},${max.y} vs written ${actual.minX},${actual.minY}..${actual.maxX},${actual.maxY}`,
+    );
+    check(`${name}: the box is non-degenerate and correctly ordered`, max.x > min.x && max.y > min.y, `${max.x - min.x} x ${max.y - min.y}`);
+    check(`${name}: extents are stable across exports`, JSON.stringify(headerPoint(exportDxf(doc, OPTIONS), '$EXTMIN')) === JSON.stringify(min), 'stable');
+  }
+
+  /* --- The arc case ------------------------------------------------------- */
+  {
+    // A square whose top edge bulges out as a semicircle. The bulge reaches
+    // 50mm beyond the vertices, so vertex-only extents would be short by
+    // exactly the radius — the failure this test exists to catch.
+    const arcDoc = importDoc(load('synthetic-curves-bulge'));
+    const text = exportDxf(arcDoc, OPTIONS);
+    const min = headerPoint(text, '$EXTMIN')!;
+    const max = headerPoint(text, '$EXTMAX')!;
+    const vertexOnly = writtenBounds(text);
+
+    check(
+      'a bulged edge pushes the extents past its own vertices',
+      max.y - min.y > vertexOnly.maxY - vertexOnly.minY + 40,
+      `extents ${(max.y - min.y).toFixed(2)}mm tall vs vertex hull ${(vertexOnly.maxY - vertexOnly.minY).toFixed(2)}mm`,
+    );
+    check(
+      'and by the arc radius, to within the flattening tolerance',
+      Math.abs((max.y - min.y) - ((vertexOnly.maxY - vertexOnly.minY) + 50)) <= 0.1,
+      `${(max.y - min.y).toFixed(4)} vs ${((vertexOnly.maxY - vertexOnly.minY) + 50).toFixed(4)}`,
+    );
+    check(
+      'the extents contain every written vertex too',
+      vertexOnly.minX >= min.x - 1e-6 && vertexOnly.maxX <= max.x + 1e-6 &&
+        vertexOnly.minY >= min.y - 1e-6 && vertexOnly.maxY <= max.y + 1e-6,
+      'contained',
+    );
+  }
+
+  /* --- Units, and the empty case ------------------------------------------ */
+  {
+    const doc = importDoc(load('5109s-sp27-pattern'));
+    const mm = headerPoint(exportDxf(doc, OPTIONS), '$EXTMAX')!;
+    const inches = headerPoint(exportDxf(doc, { ...OPTIONS, unit: 'in' }), '$EXTMAX')!;
+    check(
+      'extents are written in the file\'s own unit, like the geometry',
+      Math.abs(mm.x / 25.4 - inches.x) < 1e-6,
+      `${mm.x}mm vs ${inches.x}in`,
+    );
+
+    // A piece whose boundary the writer cannot emit leaves nothing to bound.
+    // Rather than declaring an empty box at the origin — which a reader would
+    // zoom to — the variables are left out and the gap is reported.
+    const empty: PatternDocument = {
+      ...doc,
+      pieces: doc.pieces.map((p) => ({ ...p, boundary: [], segments: [], points: [], notches: [] })),
+    };
+    const result = exportDxfWithDiagnostics(empty, OPTIONS);
+    check(
+      'a document with no writable geometry omits the extents rather than inventing 0,0',
+      !result.text.includes('$EXTMIN') && !result.text.includes('$EXTMAX'),
+      'omitted',
+    );
+    check(
+      'and says so',
+      result.issues.some((i) => i.code === 'export-no-extents' && i.message.includes('rather than')),
+      result.issues.find((i) => i.code === 'export-no-extents')?.message ?? 'missing',
+    );
+  }
+
+  /* --- Geometry is untouched by the header -------------------------------- */
+  {
+    const doc = importDoc(load('8178v-accumark'));
+    const text = exportDxf(doc, OPTIONS);
+    check(
+      'extents live in the header and change no geometry byte',
+      text.slice(text.indexOf('2\r\nBLOCKS')).length === 8211,
+      `${text.slice(text.indexOf('2\r\nBLOCKS')).length} bytes`,
+    );
+  }
 }
 
 console.log(failures === 0 ? '\nAll DXF export checks passed.' : `\n${failures} DXF export check(s) FAILED.`);
