@@ -4,6 +4,7 @@ import { orientedGeometry } from '@/marker/pieceGeometry';
 import type { LayDirection, MarkerDocument, PlacedPiece, Point } from '@/marker/schema';
 import { findViolations } from '@/marker/violations';
 import { boundsOf } from '../collision/aabb';
+import { chooseTier, fitFontSize, MIN_LABEL_FONT_PX, usableSpace } from '../labelFit';
 import type { MarkerPalette } from '../theme';
 import type { DragTool } from '../tools/DragTool';
 import type { MarkerTransform } from '../types';
@@ -443,39 +444,140 @@ export class PieceLayer {
   }
 
   /**
-   * Name over size, both centred on the piece.
+   * Name over size, centred, and never wider than the piece.
+   *
+   * A label is measured against the piece that carries it, not against the
+   * zoom: sizing by zoom alone put "Cuff right" straight across its
+   * neighbours, because a 22 x 10 cm cuff was given the same label as a
+   * 50 x 68 cm back. Where the full label will not fit, the size line goes
+   * first, then the font shrinks, then the name is truncated, then nothing is
+   * drawn at all — the grain line and the bundle colour still identify the
+   * piece, and a smear across three neighbours identifies nothing.
    *
    * Text is not rotated with the piece: a marker is read at a glance across a
    * whole spread, and labels that follow their piece end up upside down.
+   *
+   * Fitting is against the bounding box, so a label can still sit over the
+   * hollow of a deeply concave piece. Fitting inside the outline itself needs
+   * the largest inscribed rectangle, which is a lot of work for the few pieces
+   * it would change.
    */
   private buildLabels(
     node: PieceNode,
     piece: PlacedPiece,
     box: { centreX: number; centreY: number; width: number; height: number; scale: number },
   ): void {
-    const readable = box.scale >= MIN_LABEL_SCALE;
-    node.nameLabel.visible(readable);
-    node.sizeLabel.visible(readable && piece.size !== '');
-    if (!readable) return;
+    const hide = () => {
+      node.nameLabel.visible(false);
+      node.sizeLabel.visible(false);
+    };
+
+    // Cheap early-out before any text measurement.
+    if (box.scale < MIN_LABEL_SCALE || piece.name === '') {
+      hide();
+      return;
+    }
+
+    const usable = usableSpace({ width: box.width, height: box.height });
+    if (usable.width <= 0 || usable.height < MIN_LABEL_FONT_PX) {
+      hide();
+      return;
+    }
 
     const { labelSize, labelSizeSmall } = this.palette;
-    const stacked = piece.size !== '';
 
+    // Measure once at the natural size; width scales linearly from there.
     node.nameLabel.fontSize(labelSize);
     node.nameLabel.text(piece.name);
-    node.nameLabel.position({
-      x: box.centreX - node.nameLabel.width() / 2,
-      // Lift the name by half a line when a size sits under it, so the pair
-      // is centred rather than the name alone.
-      y: box.centreY - labelSize / 2 - (stacked ? labelSizeSmall / 2 : 0),
+    const naturalNameWidth = node.nameLabel.width();
+
+    const nameFont = fitFontSize(naturalNameWidth, labelSize, usable.width);
+
+    let sizeFont: number | null = null;
+    if (piece.size !== '') {
+      node.sizeLabel.fontSize(labelSizeSmall);
+      node.sizeLabel.text(piece.size);
+      sizeFont = fitFontSize(node.sizeLabel.width(), labelSizeSmall, usable.width);
+    }
+
+    const tier = chooseTier({
+      space: { width: box.width, height: box.height },
+      nameFits: nameFont !== null,
+      sizeFits: sizeFont !== null,
+      hasSize: piece.size !== '',
+      nameFontSize: nameFont ?? labelSize,
+      sizeFontSize: sizeFont ?? labelSizeSmall,
+      truncatable: true,
     });
 
-    if (!stacked) return;
-    node.sizeLabel.fontSize(labelSizeSmall);
-    node.sizeLabel.text(piece.size);
-    node.sizeLabel.position({
-      x: box.centreX - node.sizeLabel.width() / 2,
-      y: box.centreY + labelSize / 2 - labelSizeSmall / 2,
+    if (tier === 'none') {
+      hide();
+      return;
+    }
+
+    if (tier === 'truncated') {
+      const truncated = this.truncate(node.nameLabel, piece.name, usable.width, MIN_LABEL_FONT_PX);
+      if (truncated === null) {
+        hide();
+        return;
+      }
+      node.nameLabel.visible(true);
+      node.sizeLabel.visible(false);
+      this.centreLine(node.nameLabel, box, MIN_LABEL_FONT_PX, 0);
+      return;
+    }
+
+    const font = nameFont ?? labelSize;
+    node.nameLabel.fontSize(font);
+    node.nameLabel.text(piece.name);
+    node.nameLabel.visible(true);
+
+    if (tier === 'name') {
+      node.sizeLabel.visible(false);
+      this.centreLine(node.nameLabel, box, font, 0);
+      return;
+    }
+
+    const small = sizeFont ?? labelSizeSmall;
+    node.sizeLabel.fontSize(small);
+    node.sizeLabel.visible(true);
+    // Lift the name by half the second line so the pair is centred, not the
+    // name alone.
+    this.centreLine(node.nameLabel, box, font, -small / 2);
+    this.centreLine(node.sizeLabel, box, small, font / 2);
+  }
+
+  /** Centre one line horizontally, offset from the piece's middle. */
+  private centreLine(
+    label: Konva.Text,
+    box: { centreX: number; centreY: number },
+    fontSize: number,
+    offsetY: number,
+  ): void {
+    label.position({
+      x: box.centreX - label.width() / 2,
+      y: box.centreY - fontSize / 2 + offsetY,
     });
+  }
+
+  /**
+   * Shorten a name until it fits, or give up.
+   *
+   * Fewer than two real characters is not a label — "C…" on a cuff tells you
+   * less than the colour already did.
+   */
+  private truncate(
+    label: Konva.Text,
+    text: string,
+    maxWidth: number,
+    fontSize: number,
+  ): string | null {
+    label.fontSize(fontSize);
+    for (let length = text.length - 1; length >= 2; length -= 1) {
+      const candidate = `${text.slice(0, length)}…`;
+      label.text(candidate);
+      if (label.width() <= maxWidth) return candidate;
+    }
+    return null;
   }
 }
