@@ -11,9 +11,11 @@ import {
   type PieceCategory,
   type PiecePoint,
   type PieceSegment,
+  type SegmentGeometry,
   type SegmentId,
   type SizeRange,
 } from '@/pattern';
+import { arcEntityToSegment, bulgeToArc, splineToSegments } from './curves';
 import { parseRuleTable } from './ruleTable';
 import { FormatParseError } from '../errors';
 import {
@@ -292,10 +294,18 @@ const resolveUnitFactor = (
  */
 
 /** How a given (layer, entity) pair was treated. */
-export type LayerTreatment = 'outline' | 'construction' | 'notch' | 'marker' | 'metadata' | 'skipped';
+export type LayerTreatment =
+  | 'outline'
+  | 'curve'
+  | 'construction'
+  | 'notch'
+  | 'marker'
+  | 'metadata'
+  | 'skipped';
 
 export const TREATMENT_LABEL: Record<LayerTreatment, string> = {
   outline: 'imported as the piece outline',
+  curve: 'imported as a curved boundary segment',
   construction: 'imported as construction geometry, with no meaning claimed',
   notch: 'imported as a notch on the boundary',
   marker: 'imported as a construction point marking a turn or curve',
@@ -398,7 +408,24 @@ const reportLayerUsage = (
 
 interface RawPolyline {
   readonly layer: string;
-  readonly vertices: readonly Vec2[];
+  readonly vertices: readonly RawVertex[];
+  /** Position within its block. Boundary chaining is file-order only. */
+  readonly order: number;
+}
+
+/**
+ * One polyline vertex, and the shape of the segment *leaving* it.
+ *
+ * DXF puts a segment's curvature on its start vertex (group 42, the bulge), so
+ * that is where it lives here too rather than being paired off into edges the
+ * file never wrote. `geometry`, when set, is a curve already resolved from a
+ * standalone entity (an ARC or SPLINE) and takes precedence over `bulge`.
+ */
+interface RawVertex {
+  readonly position: Vec2;
+  /** `tan(theta/4)`; 0 is a straight segment, which is the overwhelming case. */
+  readonly bulge: number;
+  readonly geometry?: SegmentGeometry;
 }
 
 /** A two-point LINE. What it *means* depends on its layer — see `LayerReport`. */
@@ -428,18 +455,25 @@ interface RawBlock {
   readonly lines: readonly RawLine[];
   readonly texts: readonly RawText[];
   readonly points: readonly RawPoint[];
+  readonly arcs: readonly RawArc[];
+  readonly splines: readonly RawSpline[];
 }
 
-const readVertex = (cursor: TokenCursor): Vec2 => {
+const readVertex = (cursor: TokenCursor): RawVertex => {
   let x = 0;
   let y = 0;
+  let bulge = 0;
   while (!cursor.done() && cursor.peek()!.code !== 0) {
     const token = cursor.next();
     if (token.code === 10) x = tokenNumber(token);
     else if (token.code === 20) y = tokenNumber(token);
+    // Group 42 is the bulge *only* on a VERTEX. The same code means view
+    // height on a VPORT and width factor on a STYLE — a distinction worth
+    // keeping, since scanning a whole file for code 42 finds all three.
+    else if (token.code === 42) bulge = tokenNumber(token);
     // 8 (layer), 30 (z), 70 (vertex flags) — not meaningful for a flat 2D outline.
   }
-  return { x, y };
+  return { position: { x, y }, bulge };
 };
 
 /** `10/20` is the start point, `11/21` the end. */
@@ -457,6 +491,75 @@ const readLine = (cursor: TokenCursor): RawLine => {
     // 30/31 (z) — flat 2D pattern geometry only.
   }
   return { layer, start, end };
+};
+
+/** Raw ARC entity fields. Converted to endpoint form by `curves.ts`. */
+interface RawArc {
+  readonly layer: string;
+  readonly order: number;
+  readonly centre: Vec2;
+  readonly radius: number;
+  readonly startAngle: number;
+  readonly endAngle: number;
+}
+
+/** Raw SPLINE entity fields, enough to evaluate the curve. */
+interface RawSpline {
+  readonly layer: string;
+  readonly order: number;
+  readonly degree: number;
+  readonly closed: boolean;
+  readonly controlPoints: readonly Vec2[];
+  readonly knots: readonly number[];
+  readonly weights: readonly number[];
+}
+
+const readArc = (cursor: TokenCursor, order: number): RawArc => {
+  let layer = '0';
+  let centre: Vec2 = { x: 0, y: 0 };
+  let radius = 0;
+  let startAngle = 0;
+  let endAngle = 0;
+  while (!cursor.done() && cursor.peek()!.code !== 0) {
+    const token = cursor.next();
+    if (token.code === 8) layer = token.value;
+    else if (token.code === 10) centre = { ...centre, x: tokenNumber(token) };
+    else if (token.code === 20) centre = { ...centre, y: tokenNumber(token) };
+    else if (token.code === 40) radius = tokenNumber(token);
+    else if (token.code === 50) startAngle = tokenNumber(token);
+    else if (token.code === 51) endAngle = tokenNumber(token);
+  }
+  return { layer, order, centre, radius, startAngle, endAngle };
+};
+
+/**
+ * SPLINE's control points and knots interleave: group 10/20 repeat per control
+ * point, 40 repeats per knot, 41 per weight. They are collected as three
+ * independent runs, which is how the format writes them — pairing them up by
+ * adjacency is how a reader ends up one knot out.
+ */
+const readSpline = (cursor: TokenCursor, order: number): RawSpline => {
+  let layer = '0';
+  let degree = 3;
+  let flags = 0;
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const knots: number[] = [];
+  const weights: number[] = [];
+  while (!cursor.done() && cursor.peek()!.code !== 0) {
+    const token = cursor.next();
+    if (token.code === 8) layer = token.value;
+    else if (token.code === 70) flags = tokenNumber(token);
+    else if (token.code === 71) degree = tokenNumber(token);
+    else if (token.code === 10) xs.push(tokenNumber(token));
+    else if (token.code === 20) ys.push(tokenNumber(token));
+    else if (token.code === 40) knots.push(tokenNumber(token));
+    else if (token.code === 41) weights.push(tokenNumber(token));
+    // 11/21 (fit points), 12/13 (tangents), 42/43/44 (tolerances) — the
+    // control points define the curve; fit points are what it was fitted to.
+  }
+  const controlPoints = xs.map((x, i) => ({ x, y: ys[i] ?? 0 }));
+  return { layer, order, degree, closed: (flags & 1) === 1, controlPoints, knots, weights };
 };
 
 /** `10/20` is the marker position. POINT has no other geometry. */
@@ -487,7 +590,7 @@ const readText = (cursor: TokenCursor): RawText => {
   return { layer, value, position };
 };
 
-const readPolyline = (cursor: TokenCursor): RawPolyline => {
+const readPolyline = (cursor: TokenCursor, order: number): RawPolyline => {
   let layer = '0';
   while (!cursor.done() && cursor.peek()!.code !== 0) {
     const token = cursor.next();
@@ -498,7 +601,7 @@ const readPolyline = (cursor: TokenCursor): RawPolyline => {
     // and the vertex list cannot lie about whether it repeats its start.
   }
 
-  const vertices: Vec2[] = [];
+  const vertices: RawVertex[] = [];
   while (!cursor.done() && !cursor.at('SEQEND')) {
     if (cursor.at('VERTEX')) {
       cursor.next();
@@ -519,7 +622,7 @@ const readPolyline = (cursor: TokenCursor): RawPolyline => {
     skipFields(cursor);
   }
 
-  return { layer, vertices };
+  return { layer, vertices, order };
 };
 
 const readBlock = (cursor: TokenCursor, issues: ConversionIssue[]): RawBlock => {
@@ -537,10 +640,17 @@ const readBlock = (cursor: TokenCursor, issues: ConversionIssue[]): RawBlock => 
   const lines: RawLine[] = [];
   const texts: RawText[] = [];
   const points: RawPoint[] = [];
+  const arcs: RawArc[] = [];
+  const splines: RawSpline[] = [];
+  // Boundary chaining joins runs in the order the file wrote them, and a block
+  // may interleave polylines with arcs and splines. Collecting each kind into
+  // its own array loses that order, so it is stamped on the way past.
+  let order = 0;
   while (!cursor.done() && !cursor.at('ENDBLK')) {
     if (cursor.at('POLYLINE')) {
       cursor.next();
-      polylines.push(readPolyline(cursor));
+      polylines.push(readPolyline(cursor, order));
+      order += 1;
     } else if (cursor.at('LINE')) {
       cursor.next();
       lines.push(readLine(cursor));
@@ -550,6 +660,14 @@ const readBlock = (cursor: TokenCursor, issues: ConversionIssue[]): RawBlock => 
     } else if (cursor.at('POINT')) {
       cursor.next();
       points.push(readPoint(cursor));
+    } else if (cursor.at('ARC')) {
+      cursor.next();
+      arcs.push(readArc(cursor, order));
+      order += 1;
+    } else if (cursor.at('SPLINE')) {
+      cursor.next();
+      splines.push(readSpline(cursor, order));
+      order += 1;
     } else {
       const kind = skipEntity(cursor);
       issues.push({
@@ -565,7 +683,7 @@ const readBlock = (cursor: TokenCursor, issues: ConversionIssue[]): RawBlock => 
     skipFields(cursor);
   }
 
-  return { name, basePoint, polylines, lines, texts, points };
+  return { name, basePoint, polylines, lines, texts, points, arcs, splines };
 };
 
 const readBlocksSection = (cursor: TokenCursor, issues: ConversionIssue[]): Map<string, RawBlock> => {
@@ -812,7 +930,7 @@ const VERTEX_EPSILON_MM = 1e-6;
 const CHAIN_EPSILON = 1e-6;
 
 interface ChainedBoundary {
-  readonly vertices: readonly Vec2[];
+  readonly vertices: readonly RawVertex[];
   /** How many source polylines went into it. 1 means nothing was joined. */
   readonly joined: number;
   /** Boundary-layer polylines left over because the chain broke. */
@@ -839,7 +957,7 @@ const chainBoundary = (runs: readonly RawPolyline[]): ChainedBoundary => {
   const first = runs[0];
   if (!first) return { vertices: [], joined: 0, unjoined: 0 };
 
-  const vertices: Vec2[] = [...first.vertices];
+  const vertices: RawVertex[] = [...first.vertices];
   let joined = 1;
 
   for (let i = 1; i < runs.length; i += 1) {
@@ -849,12 +967,19 @@ const chainBoundary = (runs: readonly RawPolyline[]): ChainedBoundary => {
     if (
       !end ||
       !start ||
-      Math.abs(end.x - start.x) > CHAIN_EPSILON ||
-      Math.abs(end.y - start.y) > CHAIN_EPSILON
+      Math.abs(end.position.x - start.position.x) > CHAIN_EPSILON ||
+      Math.abs(end.position.y - start.position.y) > CHAIN_EPSILON
     ) {
       return { vertices, joined, unjoined: runs.length - i };
     }
     // Drop the shared junction vertex — the next run repeats it by definition.
+    // Its *outgoing* shape belongs to the run that continues, though, so the
+    // survivor inherits it: dropping the coordinate must not drop the curve.
+    vertices[vertices.length - 1] = {
+      ...end,
+      bulge: start.bulge,
+      ...(start.geometry ? { geometry: start.geometry } : {}),
+    };
     vertices.push(...next.vertices.slice(1));
     joined += 1;
   }
@@ -875,19 +1000,27 @@ const chainBoundary = (runs: readonly RawPolyline[]): ChainedBoundary => {
  * instead of this function guessing which visit was the mistake.
  */
 const cleanRing = (
-  points: readonly Vec2[],
+  points: readonly RawVertex[],
   issues: ConversionIssue[],
   pieceName: string,
-): Vec2[] => {
+): RawVertex[] => {
   const same = (a: Vec2, b: Vec2): boolean =>
     Math.abs(a.x - b.x) <= VERTEX_EPSILON_MM && Math.abs(a.y - b.y) <= VERTEX_EPSILON_MM;
 
-  const collapsed: Vec2[] = [];
+  const collapsed: RawVertex[] = [];
   let droppedConsecutive = 0;
   for (const point of points) {
     const last = collapsed[collapsed.length - 1];
-    if (last && same(last, point)) {
+    if (last && same(last.position, point.position)) {
       droppedConsecutive += 1;
+      // The dropped twin's *outgoing* shape is the one that survives: the
+      // segment it started is the next real segment. Keeping the survivor's
+      // own (zero-length) bulge instead would quietly straighten a curve.
+      collapsed[collapsed.length - 1] = {
+        ...last,
+        bulge: point.bulge,
+        ...(point.geometry ? { geometry: point.geometry } : {}),
+      };
       continue;
     }
     collapsed.push(point);
@@ -897,7 +1030,10 @@ const cleanRing = (
   if (result.length > 1) {
     const first = result[0]!;
     const last = result[result.length - 1]!;
-    if (same(first, last)) result = result.slice(0, -1);
+    // A closing repeat is dropped, and unlike the case above nothing is
+    // inherited: the segment it began runs back to the point being kept, so
+    // it is the zero-length one.
+    if (same(first.position, last.position)) result = result.slice(0, -1);
   }
 
   if (droppedConsecutive > 0) {
@@ -991,6 +1127,8 @@ interface ResolvedPiece {
   readonly code: string;
   /** Millimetres, this app's y-down piece space, already cleaned. */
   readonly points: readonly Vec2[];
+  /** Geometry of the boundary segment leaving `points[i]`. Same length. */
+  readonly outgoing: readonly SegmentGeometry[];
   /** Straight LINE entities, same space as `points`. Meaning deliberately unclaimed. */
   readonly constructionLines: readonly (readonly [Vec2, Vec2])[];
   /** POINT markers whose layer maps to a notch / turn point / curve point. */
@@ -1027,6 +1165,13 @@ const resolvePieces = (
       continue;
     }
 
+    const curveExactness = {
+      arcs: 0,
+      splinesExact: 0,
+      splinesApproximated: [] as string[],
+      bulges: 0,
+    };
+
     /** Block-local DXF coordinates → placed, millimetre, y-down piece space. */
     const toPieceSpace = (v: Vec2): Vec2 => ({
       x: (v.x - block.basePoint.x + insert.insertionPoint.x) * mmPerUnit,
@@ -1036,10 +1181,72 @@ const resolvePieces = (
       y: -(v.y - block.basePoint.y + insert.insertionPoint.y) * mmPerUnit,
     });
 
-    let boundaryRuns = block.polylines.filter((p) => p.layer === boundaryLayer);
+    /**
+     * Curve entities become boundary runs so they flow through exactly the
+     * chaining already proven for polylines — same head-to-tail rule, same
+     * file order, no second code path. An ARC becomes a two-vertex run whose
+     * first vertex carries the arc; a SPLINE becomes however many vertices
+     * `curves.ts` needed, exact or chorded.
+     */
+    const curveRuns: RawPolyline[] = [];
+    for (const arc of block.arcs) {
+      const resolvedArc = arcEntityToSegment(arc.centre, arc.radius, arc.startAngle, arc.endAngle);
+      if (!resolvedArc) {
+        issues.push({
+          severity: 'warning',
+          code: 'arc-not-a-segment',
+          message: `"${block.name}": an ARC on layer "${arc.layer}" spans a full circle (or none at all), which has no two distinct ends to be a boundary segment; skipped.`,
+        });
+        tally(observations, arc.layer, 'ARC', 'skipped');
+        continue;
+      }
+      curveRuns.push({
+        layer: arc.layer,
+        order: arc.order,
+        vertices: [
+          { position: resolvedArc.from, bulge: 0, geometry: resolvedArc.geometry },
+          { position: resolvedArc.to, bulge: 0 },
+        ],
+      });
+      curveExactness.arcs += 1;
+      tally(observations, arc.layer, 'ARC', 'curve');
+    }
+    for (const spline of block.splines) {
+      const converted = splineToSegments({
+        degree: spline.degree,
+        controlPoints: spline.controlPoints,
+        knots: spline.knots,
+        weights: spline.weights,
+        closed: spline.closed,
+      });
+      if (!converted) {
+        issues.push({
+          severity: 'warning',
+          code: 'spline-not-evaluable',
+          message: `"${block.name}": a SPLINE on layer "${spline.layer}" carries ${spline.controlPoints.length} control point(s), ${spline.knots.length} knot(s) and degree ${spline.degree} — not a consistent NURBS, so it could not be evaluated. Skipped rather than drawn as a straight line through its control points.`,
+        });
+        tally(observations, spline.layer, 'SPLINE', 'skipped');
+        continue;
+      }
+      curveRuns.push({
+        layer: spline.layer,
+        order: spline.order,
+        vertices: converted.points.map((position, i) => ({
+          position,
+          bulge: 0,
+          ...(converted.geometry[i] ? { geometry: converted.geometry[i]! } : {}),
+        })),
+      });
+      if (converted.exact) curveExactness.splinesExact += 1;
+      else curveExactness.splinesApproximated.push(converted.approximation ?? 'approximated');
+      tally(observations, spline.layer, 'SPLINE', 'curve');
+    }
+
+    const allRuns = [...block.polylines, ...curveRuns].sort((a, b) => a.order - b.order);
+    let boundaryRuns = allRuns.filter((p) => p.layer === boundaryLayer);
     let boundaryLayerUsed = boundaryLayer;
-    if (boundaryRuns.length === 0 && block.polylines.length > 0) {
-      const fallback = block.polylines[0]!;
+    if (boundaryRuns.length === 0 && allRuns.length > 0) {
+      const fallback = allRuns[0]!;
       boundaryRuns = [fallback];
       boundaryLayerUsed = fallback.layer;
       issues.push({
@@ -1072,7 +1279,7 @@ const resolvePieces = (
         message: `"${block.name}": ${chain.unjoined} polyline(s) on the boundary layer do not continue from the end of the previous one and were left out. They may be a second loop, an internal line on the wrong layer, or a gap in the source outline — none of which this importer will guess between.`,
       });
     }
-    const otherPolylines = block.polylines.length - boundaryRuns.length;
+    const otherPolylines = allRuns.length - boundaryRuns.length;
     if (otherPolylines > 0) {
       issues.push({
         severity: 'warning',
@@ -1081,13 +1288,58 @@ const resolvePieces = (
       });
     }
 
-    const cleaned = cleanRing(chain.vertices.map(toPieceSpace), issues, block.name);
+    /**
+     * Vertices into piece space.
+     *
+     * The sweep direction needs no adjustment, which is worth stating because
+     * the obvious reasoning says it does. The Y-flip is a reflection, so it
+     * reverses the handedness of every sweep — but `ArcGeometry.clockwise` is
+     * read in whatever frame its endpoints are in, and this app's frame is
+     * y-down. Those two inversions cancel exactly: a counter-clockwise DXF arc
+     * is still `clockwise: false` here. Flipping the flag (or negating the
+     * bulge) to "compensate" for the Y-flip bows every curve the wrong way —
+     * inward where the pattern curves out — while leaving radius, chord and
+     * sagitta all correct, so it survives any test that only checks those.
+     *
+     * A cubic's handles are absolute positions, so they *do* take the same
+     * flip as the points they shape.
+     */
+    const toPieceVertex = (v: RawVertex): RawVertex => ({
+      position: toPieceSpace(v.position),
+      bulge: v.bulge,
+      ...(v.geometry === undefined
+        ? {}
+        : v.geometry.kind === 'cubic'
+          ? {
+              geometry: {
+                ...v.geometry,
+                control1: toPieceSpace(v.geometry.control1),
+                control2: toPieceSpace(v.geometry.control2),
+              },
+            }
+          : { geometry: v.geometry }),
+    });
 
-    if (cleaned.length < 3) {
+    const cleaned = cleanRing(chain.vertices.map(toPieceVertex), issues, block.name);
+
+    /**
+     * Three points is the minimum for a straight-edged ring, but not for a
+     * curved one: two points joined by a curve and a return edge enclose area
+     * perfectly well — a lens, or a circle written as two semicircular arcs.
+     * The old rule assumed every segment was a chord, which was true of every
+     * file available when it was written and stops being true the moment a
+     * bulge or an ARC arrives.
+     */
+    const curvedSomewhere = cleaned.some((vertex, i) => {
+      if (vertex.geometry) return vertex.geometry.kind !== 'line';
+      const next = cleaned[(i + 1) % cleaned.length]!;
+      return bulgeToArc(vertex.position, next.position, vertex.bulge).kind !== 'line';
+    });
+    if (cleaned.length < 3 && !(cleaned.length === 2 && curvedSomewhere)) {
       issues.push({
         severity: 'error',
         code: 'degenerate-boundary',
-        message: `"${block.name}": fewer than 3 distinct points after removing duplicates; cannot form a piece.`,
+        message: `"${block.name}": ${cleaned.length} distinct point(s) after removing duplicates, and no curved segment between them; cannot enclose a piece.`,
       });
       continue;
     }
@@ -1162,10 +1414,48 @@ const resolvePieces = (
       });
     }
 
+    const boundaryPoints = cleaned.map((v) => v.position);
+
+    // Bulge → arc, resolved now that both endpoints are final and in piece
+    // space. A vertex with no curvature yields LINE, which is every vertex of
+    // every real fixture on hand.
+    const outgoing = cleaned.map((vertex, i): SegmentGeometry => {
+      if (vertex.geometry) return vertex.geometry;
+      const next = cleaned[(i + 1) % cleaned.length]!;
+      return bulgeToArc(vertex.position, next.position, vertex.bulge);
+    });
+    curveExactness.bulges = outgoing.filter((g, i) => g.kind === 'arc' && !cleaned[i]!.geometry).length;
+
+    // Say which curves survived intact and which are stand-ins. The
+    // distinction is the whole point: an arc reaches the offset kernel as
+    // something it can solve exactly, a chorded spline reaches it as a
+    // polyline that is merely close, and only one of those is worth trusting
+    // to a stated tolerance.
+    const exactCurves = curveExactness.arcs + curveExactness.splinesExact + curveExactness.bulges;
+    if (exactCurves > 0) {
+      const parts = [
+        curveExactness.bulges > 0 ? `${curveExactness.bulges} bulge arc(s)` : null,
+        curveExactness.arcs > 0 ? `${curveExactness.arcs} ARC entit(y/ies)` : null,
+        curveExactness.splinesExact > 0 ? `${curveExactness.splinesExact} cubic SPLINE(s)` : null,
+      ].filter((x): x is string => x !== null);
+      issues.push({
+        severity: 'info',
+        code: 'curve-preserved-exactly',
+        message: `"${block.name}": ${parts.join(', ')} were reconstructed exactly — the boundary carries real curved segments, not a flattened stand-in.`,
+      });
+    }
+    if (curveExactness.splinesApproximated.length > 0) {
+      issues.push({
+        severity: 'warning',
+        code: 'curve-approximated',
+        message: `"${block.name}": ${curveExactness.splinesApproximated.length} SPLINE(s) could not be held exactly by this app's geometry and were ${curveExactness.splinesApproximated[0]}. The shape is within that tolerance of the file's curve, not identical to it.`,
+      });
+    }
+
     const ruleNumbers = ruleNumbersForBoundary(
       block.texts,
       boundaryLayerUsed,
-      cleaned,
+      boundaryPoints,
       toPieceSpace,
       issues,
       block.name,
@@ -1195,7 +1485,8 @@ const resolvePieces = (
     resolved.push({
       name: fields.get('Piece Name') ?? block.name,
       code: block.name,
-      points: cleaned,
+      points: boundaryPoints,
+      outgoing,
       constructionLines,
       markers,
       ruleNumbers,
@@ -1331,16 +1622,24 @@ const attachNotches = (
 
 const buildPiece = (resolved: ResolvedPiece, issues: ConversionIssue[]): PatternPiece => {
   const pieceId = createId('dxf-piece');
-  const points: PiecePoint[] = resolved.points.map((position) => ({
-    id: createId(`${pieceId}-p`),
-    position,
-    role: 'corner',
-  }));
+  const points: PiecePoint[] = resolved.points.map((position, i) => {
+    // `curve` where a curved segment meets this point on either side — the
+    // same distinction the editor uses, so an imported arc behaves like a
+    // drawn one rather than looking like a corner that happens to bend.
+    const before = resolved.outgoing[(i - 1 + resolved.points.length) % resolved.points.length];
+    const after = resolved.outgoing[i];
+    const curved = (before && before.kind !== 'line') || (after && after.kind !== 'line');
+    return { id: createId(`${pieceId}-p`), position, role: curved ? 'curve' : 'corner' };
+  });
   const segments: PieceSegment[] = points.map((point, i) => ({
     id: createId(`${pieceId}-s`),
     from: point.id,
     to: points[(i + 1) % points.length]!.id,
-    geometry: LINE,
+    // The file's own curvature, not a flattened stand-in for it. `resolved`
+    // has already turned each vertex's bulge (or resolved arc/cubic) into
+    // real geometry, so a curved seam reaches the offset and measurement
+    // kernels as something they solve exactly rather than as a chord.
+    geometry: resolved.outgoing[i] ?? LINE,
   }));
 
   // A LINE becomes two `construction` points and a drawn-not-cut internal

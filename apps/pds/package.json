@@ -10,10 +10,11 @@
     "typecheck": "tsc -b --pretty",
     "check:offset": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/register.mjs scripts/check-offset.ts",
     "check:curve": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/register.mjs scripts/check-curve.ts",
-    "check": "npm run check:curve && npm run check:offset && npm run check:roundtrip && npm run check:grading && npm run check:dxf && npm run check:rul",
+    "check": "npm run check:curve && npm run check:offset && npm run check:roundtrip && npm run check:grading && npm run check:dxf && npm run check:rul && npm run check:curves",
     "check:roundtrip": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/register.mjs scripts/check-roundtrip.ts",
     "check:grading": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/register.mjs scripts/check-grading.ts",
     "check:dxf": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/register.mjs scripts/check-dxf-import.ts",
+    "check:curves": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/register.mjs scripts/check-curves.ts",
     "check:rul": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/register.mjs scripts/check-rul.ts",
     "report:dxf": "node --disable-warning=ExperimentalWarning --experimental-strip-types --import ./scripts/register.mjs scripts/report-dxf.ts"
   },

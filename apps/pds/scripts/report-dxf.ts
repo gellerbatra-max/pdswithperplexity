@@ -57,11 +57,23 @@ for (const name of files) {
   const { document, issues, layers } = result;
   const counts = countBySeverity(issues);
   const points = document.pieces.reduce((sum, piece) => sum + piece.points.length, 0);
+  const curved = document.pieces.reduce(
+    (sum, piece) => sum + piece.segments.filter((s) => s.geometry.kind !== 'line').length,
+    0,
+  );
   const internalLines = document.pieces.reduce((sum, piece) => sum + piece.internalLines.length, 0);
   const names = [...new Set(document.pieces.map((piece) => piece.name))];
 
   console.log(`  pieces: ${document.pieces.length} (${names.join(', ')})`);
   console.log(`  points: ${points}   internal lines: ${internalLines}   style: "${document.name}"`);
+  const approximated = issues.filter((i) => i.code === 'curve-approximated').length;
+  const exactCurves = issues.filter((i) => i.code === 'curve-preserved-exactly').length;
+  console.log(
+    `  curved segments: ${curved}` +
+      (exactCurves > 0 ? `  (${exactCurves} piece(s) carry curves reconstructed exactly)` : '') +
+      (approximated > 0 ? `  (${approximated} piece(s) had a curve chorded to tolerance)` : '') +
+      (curved === 0 && approximated === 0 ? '  — every edge is straight, as every real vendor export on hand is' : ''),
+  );
   console.log(`  issues: ${counts.error} error(s), ${counts.warning} warning(s), ${counts.info} note(s)`);
 
   console.log('  layers:');

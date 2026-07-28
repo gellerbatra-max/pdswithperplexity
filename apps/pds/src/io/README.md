@@ -15,6 +15,7 @@ io/
     ├── types.ts        Flavour, options, entity kinds, ConversionIssue
     ├── tokenizer.ts     ASCII group-code tokeniser (code/value pairs)
     ├── layerMapping.ts  Pattern concept ↔ DXF layer number, + fixture evidence
+    ├── curves.ts        bulge / ARC / SPLINE → SegmentGeometry (spec-driven)
     ├── ruleTable.ts     Companion .RUL grade rule table → SizeRange/GradeRule
     ├── import.ts        Parser + topology rebuild — real; see scope below
     ├── export.ts        Writer (not implemented) + describeExportPlan
@@ -31,6 +32,7 @@ io/
 | DXF export validation | Implemented and useful today |
 | DXF import (tokenizer, BLOCK/INSERT resolution, topology rebuild) | **Real**, scoped to what three real fixtures prove: boundary polylines including outlines split into head-to-tail chains, units from `$INSUNITS` / `Units:` (METRIC, IMPERIAL, ENGLISH), self-labelled `Key:Value` metadata, LINE kept as unclaimed construction geometry, and POINT entities read as notches and turn/curve markers |
 | Companion `.RUL` grade rule table | **Real** — parsed into `SizeRange` + `GradeRule[]`, attached to points via the DXF's `# N` marks. Optional: absent, the geometry imports identically |
+| DXF curve entities | **Real, but spec-driven rather than evidence-driven** — bulge and `ARC` reconstruct exactly, a degree-3 four-point `SPLINE` becomes an exact cubic, any other `SPLINE` is chorded to `FLATTEN_TOLERANCE_MM` and reported as approximated. Fixtures are synthetic; see below |
 | DXF writer | **Not implemented** — throws |
 
 ### The three fixtures, and what each one broke
@@ -69,6 +71,38 @@ doesn't recognise gets a warning naming it (or an error, under
 `options.strict`) and is skipped, never silently dropped or reinterpreted.
 Export is untouched and still throws `FormatNotImplementedError` — nothing
 here may return invented geometry, in either direction.
+
+### Curves: the one capability not built from a real file
+
+Every other thing here was built after a real file proved what it looks like.
+Curve support was not, and the reason is itself a finding: **125 real DXF
+files were scanned — every apparel export on hand, across three CAD vendors —
+and between them they contain zero `ARC` entities, zero `SPLINE` entities, and
+not one non-zero bulge on a pattern polyline.** Apparel CAD pre-flattens. It
+ships densely-sampled straight lines and leaves the receiving system to re-fit
+curves if it wants them.
+
+(Scanning for group code 42 alone is misleading, incidentally: it means bulge
+on a `VERTEX`, view height on a `VPORT` and width factor on a `STYLE`. A naive
+scan "finds" bulges in files that have none.)
+
+So `curves.ts` is written against the DXF specification, its fixtures are
+synthetic and labelled as such (`synthetic-curves.dxf.md`), and its tests check
+against geometric definitions computed independently of the implementation —
+a bulge arc's height against `sagitta = |bulge| × chord/2`, an arc's length
+against `r·θ`, a tessellation's error by re-evaluating the curve it replaced.
+
+What that buys: an importer that meets a curve reconstructs it exactly where
+the model can hold it, chords it to a stated tolerance where it cannot, and
+says which of the two happened. What it does not buy is the confidence the
+rest of this module has. **When a real curve-bearing file turns up, treat it
+as a test of this code rather than as routine input** — run `npm run
+report:dxf` on it first.
+
+The work also exposed a real bug in the straight-line path: a boundary of two
+points was rejected as degenerate, which is right for chords and wrong the
+moment a curve is involved — two points joined by a curve enclose area (a
+lens; a circle written as two semicircular arcs). Fixed, and regression-tested.
 
 ## Why layer mapping is the centre of it
 
@@ -144,13 +178,12 @@ six bindings now have real-file backing, four are contradicted, and layer 5 is
 contradicted *twice over by unrelated writers*. "Unverified" was a suspicion
 two files ago; it is a measurement now.
 
-**The next file should have a curve in it.** Every fixture so far is
-densely-sampled straight lines, so `SegmentGeometry`'s arc and cubic cases —
-which the editor and the offset kernel are built around — have never once run
-against real imported data. A file with `ARC`, `SPLINE`, or a `POLYLINE`
-carrying bulge factors would be the first to exercise them, and would settle
-whether the "every vertex is a corner" reading holds up or is an artefact of
-three files that happen to pre-flatten.
+**The next file should still have a curve in it** — but the question has
+changed. Curve *support* now exists and is exercised by synthetic fixtures;
+what is missing is a real file to confirm the spec reading matches what a
+vendor actually writes. Since no apparel export on hand contains one, the
+likeliest source is a file exported *for* apparel from general CAD
+(Illustrator, Rhino, AutoCAD) rather than from a pattern system.
 
 After that: a file that uses layer 11 or 13 (the last two untested bindings),
 and a second `.RUL`-bearing style from a *different* CAD system, to show
@@ -195,6 +228,15 @@ one is the base-size column: a grade rule is displacement *relative to* the
 sample size, so a non-zero there means misaligned columns or a wrong
 `SAMPLE SIZE` header, and grading from it would move every point of every
 piece — including the size that was meant to be the reference.
+
+```bash
+npm run check:curves --workspace=apps/pds
+```
+
+58 assertions on curve import — the only suite here running against synthetic
+fixtures, for the reason given above. It also asserts the three real fixtures
+still import with every segment straight and every point a corner, so curve
+support stays provably inert on files that have no curves.
 
 ```bash
 npm run report:dxf --workspace=apps/pds

@@ -17,6 +17,7 @@
     "check:roundtrip": "npm run check:roundtrip --workspace apps/pds",
     "check:grading": "npm run check:grading --workspace apps/pds",
     "check:dxf": "npm run check:dxf --workspace apps/pds",
+    "check:curves": "npm run check:curves --workspace apps/pds",
     "check:rul": "npm run check:rul --workspace apps/pds",
     "report:dxf": "npm run report:dxf --workspace apps/pds"
   }

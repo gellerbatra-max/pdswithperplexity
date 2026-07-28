@@ -38,6 +38,7 @@ intended tool sets, because there the list is the only statement of coverage.
 | Numeric point + edge editing | Real — inspector writes through commands |
 | Grading | Real — named sizes, a shared grade-rule table, per-point propagation, full rule/assignment CRUD as undoable commands, real diagnostics. See below; a real *solver* (construction-line-aware, seam-length-preserving) is still future work |
 | DXF import | Real for what three production files prove — outlines including ones split into head-to-tail polyline chains, units from `$INSUNITS` or a `Units:` field (METRIC/IMPERIAL/ENGLISH), self-labelled `Key:Value` metadata, `LINE` kept as unclaimed construction geometry, `POINT` read as notches and turn/curve markers. Curves and drill holes: not read, warned and skipped. Grain deliberately *not* claimed. Reachable from the UI: `Import DXF (AAMA/ASTM)…` picks the file (and its `.RUL`), a review dialog shows the full account before anything replaces the open document, and the session stays inspectable via `Show last DXF import report` |
+| DXF curves | Real for `bulge`, `ARC` and `SPLINE` — exact where the model can hold the curve (bulge/ARC → arc, degree-3 four-point SPLINE → cubic), chorded to `FLATTEN_TOLERANCE_MM` and reported as approximated where it cannot. **Spec-driven, not evidence-driven**: no real apparel export on hand contains a curve entity, so its fixtures are synthetic |
 | DXF grading (`.RUL`) | Real — the companion rule table parses into `SizeRange` + `GradeRule[]` and attaches to points via the DXF's `# N` marks. Optional and non-destructive: without it the geometry imports identically |
 | DXF export | **Not implemented** — throws |
 | Undo/redo | Real — inverse-command stack (`historyStore.ts` + `documentCommands.ts`) |
@@ -136,8 +137,8 @@ overrides work. `npm run check:offset` verifies it against hand-derivable
 answers — squares, an L, a slot narrower than twice the offset, and a circle.
 
 `npm run check` runs all five self-check suites — curve, offset, round-trip,
-grading, DXF import and the DXF rule table, 389 assertions. They are not a
-test framework and are
+grading, DXF import, the DXF rule table and DXF curves, 447 assertions. They
+are not a test framework and are
 not an argument for adding one; they exist because this is the code whose
 mistakes look plausible on screen and only show up in someone's cut file.
 `scripts/` carries a small Node resolver hook so the checks can import the
@@ -479,15 +480,55 @@ every piece in every size — including the one meant to be the reference. It is
 verified twice: once through the parser, once by re-reading the fixture's raw
 text without it.
 
-- **What would unblock the next slice**: a file with a **curve** in it. Every
-  fixture so far is densely-sampled straight lines, so `SegmentGeometry`'s arc
-  and cubic cases — which the editor and the offset kernel are built around —
-  have never run against real imported data. `ARC`, `SPLINE`, or a `POLYLINE`
-  with bulge factors would be the first to exercise them, and would settle
-  whether "every vertex is a corner" holds or is an artefact of three files
-  that pre-flatten. After that: layers 11 and 13 (the last untested bindings),
-  and a `.RUL`-bearing style from a different CAD system. None of it replaces
-  the ASTM D6673 text, which is the only thing that can settle the four
+#### Curves: the one slice built from the spec, not from a file
+
+Curve support (`io/dxf/curves.ts`) is the exception to this module's rule that
+nothing is built until a real file proves it — and the exception is itself the
+finding. **125 real DXF files were scanned first: every apparel export on
+hand, three CAD vendors, and between them zero `ARC` entities, zero `SPLINE`
+entities, and not one non-zero bulge on a pattern polyline.** Apparel CAD
+pre-flattens; it ships densely-sampled straight lines. (Scanning for group
+code 42 naively is misleading: it is bulge on a `VERTEX`, view height on a
+`VPORT`, width factor on a `STYLE`.)
+
+So the choice was to leave curves unsupported indefinitely, or build against
+the specification and be loud about the difference. The second, with:
+
+- **bulge → arc, exactly.** `tan(θ/4)` on the start vertex; `ArcGeometry`
+  holds a circular arc natively, so nothing is lost.
+- **`ARC` entity → arc, exactly**, joining the boundary by the *same*
+  head-to-tail chaining rule already proven for polylines — entities are
+  stamped with their position in the block so a mixed run keeps file order.
+  No second chaining path.
+- **`SPLINE`**: a degree-3, four-control-point, unweighted, clamped spline
+  *is* a cubic Bézier, so it converts exactly. Anything else is evaluated with
+  de Boor (weights carried in homogeneous coordinates, so rational splines
+  evaluate correctly) and subdivided until it is within
+  `FLATTEN_TOLERANCE_MM` of the true curve. Fitting cubics to a general NURBS
+  would look better in the model and be harder to be sure of; chording to a
+  stated tolerance is a claim that can be checked, and `check-curves.ts`
+  checks it by re-evaluating the curve the chords replaced.
+- **The two are never confused.** `curve-preserved-exactly` and
+  `curve-approximated` are separate diagnostics, and the report and review
+  dialog show which happened.
+- **The Y-flip is where curves go wrong.** It is a reflection, so it reverses
+  every sweep: bulge sign flips, `clockwise` inverts, and a cubic's handles —
+  absolute positions — flip with the points they shape. Done once, beside the
+  coordinate flip. Getting it wrong bulges every curve outward where the
+  pattern curves in, and the test that catches it fails on exactly that.
+
+It also exposed a real bug in the straight-line path: a two-point boundary was
+rejected as degenerate, which is correct for chords and wrong once a curve is
+involved — two points joined by a curve enclose area (a lens; a circle as two
+semicircular arcs). Fixed and regression-tested.
+
+- **What would unblock the next slice**: a real curve-bearing file, to confirm
+  the spec reading matches what a vendor writes. Since no apparel export on
+  hand has one, the likeliest source is a file exported *for* apparel from
+  general CAD (Illustrator, Rhino, AutoCAD) rather than from a pattern system.
+  After that: layers 11 and 13 (the last untested bindings), and a
+  `.RUL`-bearing style from a different CAD system. None of it replaces the
+  ASTM D6673 text, which is the only thing that can settle the five
   contradictions.
 
 #### The import workflow (how the parser is reached from the app)

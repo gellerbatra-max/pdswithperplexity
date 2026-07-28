@@ -1228,3 +1228,8 @@ body.is-resizing {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 40%, transparent);
 }
+
+.import-badge[data-treatment='curve'] {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 40%, transparent);
+}

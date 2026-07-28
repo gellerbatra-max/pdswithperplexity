@@ -27,6 +27,7 @@ const SEVERITY_LABEL: Record<Severity, string> = {
 /** Short badge text per treatment; the full sentence is in the row title. */
 const TREATMENT_BADGE: Record<Dxf.LayerTreatment, string> = {
   outline: 'outline',
+  curve: 'curve',
   construction: 'kept, unclaimed',
   notch: 'notches',
   marker: 'markers',
