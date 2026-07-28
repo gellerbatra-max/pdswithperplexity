@@ -104,6 +104,16 @@
   --ruler-tick-major: #71717a;
   --ruler-label: #52525b;
 
+  /* Drag-select rectangle. Dashed, so it reads as a gesture in progress
+     rather than as an object that has been placed. */
+  --marquee-line: #6da3d4;
+  --marquee-fill: rgba(109, 163, 212, 0.12);
+
+  /* Heads-up chips: cursor readout and zoom. Dark enough to stay legible over
+     pale fabric, since they float above the stage rather than the chrome. */
+  --hud-bg: rgba(16, 19, 25, 0.88);
+  --hud-text: #e4e9f0;
+
   /* Defect zones and splice lines are obstacles the marker maker did not
      choose, so they read as damage rather than as content. */
   --defect-fill: rgba(229, 72, 77, 0.18);

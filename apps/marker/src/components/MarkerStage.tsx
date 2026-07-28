@@ -4,7 +4,7 @@ import { commandForKey } from '@/commands/registry';
 import { importDxfFile } from '@/io/dxfImporter';
 import { useMarkerStore } from '@/store/markerStore';
 import { useUiStore } from '@/store/uiStore';
-import { useViewportStore } from '@/store/viewportStore';
+import { DEFAULT_ZOOM, useViewportStore } from '@/store/viewportStore';
 
 /**
  * Hosts the imperative Konva canvas.
@@ -109,6 +109,8 @@ export const MarkerStage = () => {
         ui.setSelection(additive ? [...new Set([...ui.selection, ...pieceIds])] : pieceIds);
       },
       onClickEmpty: () => useUiStore.getState().clearSelection(),
+    }, {
+      referenceZoom: DEFAULT_ZOOM,
     });
 
     const render = () =>

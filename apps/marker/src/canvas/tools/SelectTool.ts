@@ -1,7 +1,8 @@
-import Konva from 'konva';
+import type Konva from 'konva';
 import { boundsOf } from '@/canvas/collision/aabb';
 import { orientedGeometry } from '@/marker/pieceGeometry';
 import type { MarkerDocument } from '@/marker/schema';
+import type { UILayer } from '../layers/UILayer';
 import type { MarkerTransform } from '../types';
 
 /**
@@ -11,9 +12,6 @@ import type { MarkerTransform } from '../types';
  * selects every piece it touches. Dragging on a piece is DragTool's gesture,
  * so this only starts when the pointer went down on the stage itself.
  */
-
-const MARQUEE_FILL = 'rgba(109, 163, 212, 0.12)';
-const MARQUEE_STROKE = '#6da3d4';
 
 /** Below this the gesture was a click, not a marquee. */
 const MIN_MARQUEE_PX = 3;
@@ -61,23 +59,21 @@ export const piecesInRect = (document: MarkerDocument, rect: Rect): string[] => 
 };
 
 export class SelectTool {
-  private readonly marquee = new Konva.Rect({
-    fill: MARQUEE_FILL,
-    stroke: MARQUEE_STROKE,
-    strokeWidth: 1,
-    dash: [4, 3],
-    listening: false,
-    visible: false,
-    shadowForStrokeEnabled: false,
-  });
+  /**
+   * The rectangle belongs to the UI layer, not to this tool: it is heads-up
+   * furniture that the layer styles from the design tokens, and a tool that
+   * carried its own would carry its own colours too.
+   */
+  private ui: UILayer | null = null;
 
   private origin: { x: number; y: number } | null = null;
+  private current: { x: number; y: number; width: number; height: number } | null = null;
   private additive = false;
 
   constructor(private readonly callbacks: SelectToolCallbacks) {}
 
-  attach(stage: Konva.Stage, uiLayer: Konva.Layer): void {
-    uiLayer.add(this.marquee);
+  attach(stage: Konva.Stage, ui: UILayer): void {
+    this.ui = ui;
 
     stage.on('mousedown touchstart', (event) => {
       // Only the bare stage starts a marquee; a hit on a piece belongs to
@@ -88,8 +84,8 @@ export class SelectTool {
 
       this.origin = point;
       this.additive = event.evt instanceof MouseEvent && event.evt.shiftKey;
-      this.marquee.setAttrs({ x: point.x, y: point.y, width: 0, height: 0, visible: true });
-      uiLayer.batchDraw();
+      this.current = { x: point.x, y: point.y, width: 0, height: 0 };
+      ui.showMarquee(point.x, point.y, 0, 0);
     });
 
     stage.on('mousemove touchmove', () => {
@@ -97,24 +93,24 @@ export class SelectTool {
       const point = stage.getPointerPosition();
       if (!point) return;
 
-      this.marquee.setAttrs({
+      this.current = {
         x: Math.min(this.origin.x, point.x),
         y: Math.min(this.origin.y, point.y),
         width: Math.abs(point.x - this.origin.x),
         height: Math.abs(point.y - this.origin.y),
-      });
-      uiLayer.batchDraw();
+      };
+      ui.showMarquee(this.current.x, this.current.y, this.current.width, this.current.height);
     });
 
     stage.on('mouseup touchend', () => {
       const origin = this.origin;
-      if (!origin) return;
+      const box = this.current;
+      if (!origin || !box) return;
       this.origin = null;
+      this.current = null;
 
-      const width = this.marquee.width();
-      const height = this.marquee.height();
-      this.marquee.visible(false);
-      uiLayer.batchDraw();
+      const { width, height } = box;
+      ui.hideMarquee();
 
       const context = this.callbacks.getContext();
       if (!context) return;
@@ -125,8 +121,8 @@ export class SelectTool {
       }
 
       const { transform } = context;
-      const left = this.marquee.x();
-      const top = this.marquee.y();
+      const left = box.x;
+      const top = box.y;
       // Stage Y runs down and marker Y runs up, so the rectangle's top edge is
       // the larger marker coordinate.
       const rect: Rect = {
@@ -141,6 +137,7 @@ export class SelectTool {
   }
 
   destroy(): void {
-    this.marquee.destroy();
+    this.ui?.hideMarquee();
+    this.ui = null;
   }
 }

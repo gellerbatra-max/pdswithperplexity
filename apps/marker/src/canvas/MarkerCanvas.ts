@@ -3,7 +3,8 @@ import type { MarkerDocument, Point } from '@/marker/schema';
 import { markerLength } from '@/marker/selectors';
 import { FabricLayer } from './layers/FabricLayer';
 import { PieceLayer } from './layers/PieceLayer';
-import { readPalette } from './theme';
+import { UILayer } from './layers/UILayer';
+import { readPalette, type MarkerPalette } from './theme';
 import { DragTool, type DragToolContext } from './tools/DragTool';
 import { SelectTool } from './tools/SelectTool';
 import type { MarkerTransform, ViewportSnapshot } from './types';
@@ -34,20 +35,33 @@ export interface MarkerCanvasCallbacks {
   onClickEmpty: () => void;
 }
 
+export interface MarkerCanvasOptions {
+  /**
+   * The scale the zoom indicator calls 100%.
+   *
+   * Passed in rather than imported from the viewport store: the canvas reads
+   * no store, so it can be driven by a test or a replayed document.
+   */
+  readonly referenceZoom: number;
+}
+
 export class MarkerCanvas {
   private readonly stage: Konva.Stage;
-  private readonly fabricLayer = new FabricLayer();
+
   /**
    * Canvas colours are resolved from the design tokens once, here: Konva takes
    * literal colour strings and cannot read a CSS custom property.
    */
-  private readonly pieceLayer = new PieceLayer(readPalette());
+  private readonly palette: MarkerPalette = readPalette();
+
+  private readonly fabricLayer = new FabricLayer(this.palette);
+  private readonly pieceLayer = new PieceLayer(this.palette);
 
   // Layer order is the render order: fabric behind, UI in front. Only the
   // piece layer listens; Konva 9.3 deprecates FastLayer in favour of exactly
   // this, a Layer with hit detection switched off.
   private readonly overlayLayer = new Konva.Layer({ listening: false });
-  private readonly uiLayer = new Konva.Layer({ listening: false });
+  private readonly uiLayer = new UILayer(this.palette);
 
   private readonly selectTool: SelectTool;
   private readonly resizeObserver: ResizeObserver;
@@ -59,7 +73,11 @@ export class MarkerCanvas {
    */
   private context: DragToolContext | null = null;
 
-  constructor(container: HTMLDivElement, callbacks: MarkerCanvasCallbacks) {
+  constructor(
+    container: HTMLDivElement,
+    callbacks: MarkerCanvasCallbacks,
+    private readonly options: MarkerCanvasOptions,
+  ) {
     this.stage = new Konva.Stage({
       container,
       width: container.clientWidth,
@@ -68,20 +86,34 @@ export class MarkerCanvas {
 
     this.stage.add(this.fabricLayer.layer);
     this.stage.add(this.pieceLayer.layer);
-    // TODO(step-7): OverlayLayer draws defect zones, splice lines, violations.
+    // TODO(step-7): OverlayLayer draws defect zones and splice lines.
     this.stage.add(this.overlayLayer);
-    // TODO(step-6): UILayer draws rulers, selection handles, cursor readout.
-    this.stage.add(this.uiLayer);
+    this.stage.add(this.uiLayer.layer);
 
     this.resizeObserver = new ResizeObserver((entries) => {
       const [entry] = entries;
       if (!entry) return;
       const { width, height } = entry.contentRect;
       this.stage.size({ width, height });
+      this.uiLayer.setStageSize(width, height);
       callbacks.onStageResize(width, height);
     });
     this.resizeObserver.observe(container);
+    this.uiLayer.setStageSize(container.clientWidth, container.clientHeight);
     callbacks.onStageResize(container.clientWidth, container.clientHeight);
+
+    // The readout is in centimetres, converted here so it cannot disagree with
+    // the coordinate system the rest of the app works in.
+    this.stage.on('mousemove', () => {
+      const pointer = this.stage.getPointerPosition();
+      const context = this.context;
+      if (!pointer || !context) return;
+      this.uiLayer.setCursor({
+        x: context.transform.toMarkerX(pointer.x),
+        y: context.transform.toMarkerY(pointer.y),
+      });
+    });
+    this.stage.on('mouseleave', () => this.uiLayer.setCursor(null));
 
     this.detachPointerHandlers = attachMiddleMousePan(container, callbacks.onPanBy);
 
@@ -120,7 +152,14 @@ export class MarkerCanvas {
       fabricWidth: document.fabricWidth,
       fabricLength: Math.max(markerLength(document), MIN_FABRIC_LENGTH),
       transform,
+      stageWidth: this.stage.width(),
+      stageHeight: this.stage.height(),
     });
+
+    // 100% is the default zoom, which is the only definition meaningful to a
+    // person: screen DPI is unknown, so a figure against physical size would
+    // be a guess dressed as a measurement.
+    this.uiLayer.setZoom({ scale: viewport.zoom, referenceScale: this.options.referenceZoom });
 
     this.pieceLayer.update({
       document,

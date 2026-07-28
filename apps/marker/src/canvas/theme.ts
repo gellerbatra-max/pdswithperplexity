@@ -30,10 +30,19 @@ export interface MarkerPalette {
   readonly fabricBg: string;
   readonly fabricEdge: string;
   readonly fabricGuide: string;
+  readonly gridLine: string;
+  readonly gridLineMajor: string;
   readonly rulerTick: string;
+  readonly rulerTickMajor: string;
+  readonly rulerLabel: string;
+  readonly marqueeLine: string;
+  readonly marqueeFill: string;
+  readonly hudBg: string;
+  readonly hudText: string;
   readonly labelSize: number;
   readonly labelSizeSmall: number;
   readonly fontUi: string;
+  readonly fontMono: string;
 }
 
 export const BUNDLE_COLOUR_COUNT = 8;
@@ -87,9 +96,18 @@ export const readPalette = (element: HTMLElement = document.documentElement): Ma
     fabricBg: token('--fabric-bg', '#f4f4f5'),
     fabricEdge: token('--fabric-edge', '#d4d4d8'),
     fabricGuide: token('--fabric-guide', '#a1a1aa'),
+    gridLine: token('--grid-line', 'rgba(15, 23, 42, 0.06)'),
+    gridLineMajor: token('--grid-line-major', 'rgba(15, 23, 42, 0.12)'),
     rulerTick: token('--ruler-tick', '#a1a1aa'),
+    rulerTickMajor: token('--ruler-tick-major', '#71717a'),
+    rulerLabel: token('--ruler-label', '#52525b'),
+    marqueeLine: token('--marquee-line', '#6da3d4'),
+    marqueeFill: token('--marquee-fill', 'rgba(109, 163, 212, 0.12)'),
+    hudBg: token('--hud-bg', 'rgba(16, 19, 25, 0.88)'),
+    hudText: token('--hud-text', '#e4e9f0'),
     labelSize: px(token('--text-xs', '11px'), 11),
     labelSizeSmall: px(token('--text-2xs', '10px'), 10),
     fontUi: token('--font-ui', 'system-ui, sans-serif'),
+    fontMono: token('--font-mono', 'ui-monospace, monospace'),
   };
 };

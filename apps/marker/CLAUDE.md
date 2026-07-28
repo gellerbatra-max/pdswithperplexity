@@ -937,6 +937,37 @@ Caching rules, which the flash depends on:
 ✓ Verify: overlapping pieces flash red, and stop when resolved.
 ✓ Verify: no TypeScript errors, existing tests still pass.
 
+### Phase 1 Step 3 — Canvas Polish
+
+`FabricLayer` draws the fabric fill, a two-weight grid, the width guide
+and rulers with ticks and labels. `UILayer` becomes a real layer owning
+the cursor readout, the zoom indicator and the marquee rectangle.
+
+**The cursor readout belongs on UILayer, not FabricLayer.** FabricLayer
+is the static backdrop, redrawn only when the fabric or camera changes;
+a readout repaints on every mouse move and would drag the whole backdrop
+with it. The layer stack above already assigns cursor coordinates here.
+
+`canvas/gridSteps.ts` picks intervals, and is pure so it can be tested:
+- Steps are 1, 2 or 5 times a power of ten — the numbers a marker maker
+  counts in. 16 cm and 32 cm are not intervals anyone reads.
+- Majors always land on a power of ten, so a 5 cm minor gives a 10 cm
+  major rather than 25 cm.
+- Grid and ruler draw only the span the viewport can show, so cost does
+  not grow with the length of the marker.
+- Below `MIN_GRID_SCALE` the grid switches off; zoomed out it is a grey
+  wash that hides the pieces.
+
+**Zoom 100% means the default zoom**, not physical size — screen DPI is
+unknown, so a percentage against real-world size would be a guess
+dressed as a measurement. It is passed in as `referenceZoom`, because
+nothing under `canvas/` may import a store.
+
+✓ Verify: the grid is visible at normal zoom and gone at very low zoom.
+✓ Verify: ruler labels sit at the centimetre they name.
+✓ Verify: the cursor readout tracks the pointer and clears on leave.
+✓ Verify: the zoom percentage tracks the camera.
+
 ---
 
 ## Replying to Claude After Each Step

@@ -33,4 +33,7 @@ export interface FabricLayerInput {
   readonly fabricWidth: number;
   readonly fabricLength: number;
   readonly transform: MarkerTransform;
+  /** Stage size in px, so grid and ruler draw only what can be seen. */
+  readonly stageWidth: number;
+  readonly stageHeight: number;
 }
