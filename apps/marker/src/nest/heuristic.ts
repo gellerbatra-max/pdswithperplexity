@@ -23,8 +23,9 @@ import type {
   SpliceLine,
   TrayPiece,
 } from '@/marker/schema';
+import { anglesFor, polygonArea, rotationPolicyFor, type NestEffort } from './model';
 
-export type NestEffort = 1 | 2 | 3 | 4 | 5;
+export type { NestEffort };
 
 export interface NestInput {
   readonly pieces: TrayPiece[];
@@ -53,24 +54,15 @@ export interface NestResult {
   readonly unplaced: string[];
 }
 
-/** A free piece gets 8 angles at effort 1, and 8 more for each step up. */
-const FREE_ANGLES_PER_EFFORT = 8;
-
 /**
  * Angles this piece may be tried at.
  *
- * Effort subdivides the circle for free-direction pieces only: 8 angles at
- * effort 1 through 40 at effort 5. Grain-constrained pieces ignore it — no
- * amount of searching makes it acceptable to cut a two-way piece off-grain.
+ * The rule lives in `model.ts` so both engines turn pieces the same way; this
+ * is the lay-direction spelling of it, kept because callers hold a
+ * `TrayPiece`, not a policy.
  */
-export const rotationsFor = (layDirection: LayDirection, effort: NestEffort): number[] => {
-  if (layDirection === '2way') return [0, 180];
-  if (layDirection === '4way') return [0, 90, 180, 270];
-
-  const count = FREE_ANGLES_PER_EFFORT * effort;
-  const step = 360 / count;
-  return Array.from({ length: count }, (_, index) => index * step);
-};
+export const rotationsFor = (layDirection: LayDirection, effort: NestEffort): number[] =>
+  anglesFor(rotationPolicyFor(layDirection), effort);
 
 /**
  * How far past the current marker end the scan is allowed to reach.
@@ -162,18 +154,6 @@ const collides = (
   return false;
 };
 
-/** Shoelace area, for the utilisation figure. */
-const areaOf = (points: readonly Point[]): number => {
-  if (points.length < 3) return 0;
-  let sum = 0;
-  for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
-    const a = points[i];
-    const b = points[j];
-    if (a && b) sum += (b.x + a.x) * (b.y - a.y);
-  }
-  return Math.abs(sum / 2);
-};
-
 export interface NestProgress {
   (percent: number): void;
 }
@@ -212,7 +192,7 @@ export const nest = (input: NestInput, onProgress?: NestProgress): NestResult =>
     const bounds = boundsOf(orientedGeometry(piece));
     return Math.max(longest, piece.position.x + bounds.maxX);
   }, 0);
-  for (const piece of input.placed) placedArea += areaOf(piece.geometry);
+  for (const piece of input.placed) placedArea += polygonArea(piece.geometry);
 
   for (const [index, piece] of queue.entries()) {
     const candidates = candidatesFor(piece, rotationsFor(piece.layDirection, effort));
@@ -248,7 +228,7 @@ export const nest = (input: NestInput, onProgress?: NestProgress): NestResult =>
             toObstacle(candidate.parts.map((part) => translate(part, at))),
           );
           markerLength = Math.max(markerLength, at.x + candidate.bounds.maxX);
-          placedArea += areaOf(piece.geometry);
+          placedArea += polygonArea(piece.geometry);
           landed = true;
           break;
         }

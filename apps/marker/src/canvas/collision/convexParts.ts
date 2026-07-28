@@ -15,14 +15,14 @@ import type { Point } from '@/marker/schema';
 
 const cache = new WeakMap<readonly Point[], Point[][]>();
 
-export const convexPartsOf = (geometry: Point[]): Point[][] => {
+export const convexPartsOf = (geometry: readonly Point[]): Point[][] => {
   const cached = cache.get(geometry);
   if (cached) return cached;
 
   const { parts } = decompose(geometry);
   // A decomposition that failed falls back to the outline: collision stays
   // conservative rather than disappearing.
-  const result = parts.length > 0 ? parts : [geometry];
+  const result = parts.length > 0 ? parts : [[...geometry]];
   cache.set(geometry, result);
   return result;
 };
