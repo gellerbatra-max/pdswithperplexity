@@ -33,6 +33,7 @@ import {
   type NestSheet,
   type SpacingRules,
 } from './model';
+import { compareScores, scorePlan, timeRun, type NestScore } from './scoring';
 import { nestShelf } from './shelf';
 
 /**
@@ -201,6 +202,47 @@ export const runNest = (
   const result = nest(toHeuristicInput(request), onProgress);
   return planFromHeuristic(result, request, expanded);
 };
+
+/* --- Scored runs --------------------------------------------------------- */
+
+export interface ScoredRun {
+  readonly engine: NestEngine;
+  readonly plan: NestPlan;
+  readonly score: NestScore;
+}
+
+/** Run one engine and score what it produced, timing the run itself. */
+export const runScored = (
+  request: NestRequest,
+  engine: NestEngine,
+  onProgress?: NestProgress,
+): ScoredRun => {
+  const expanded = expandQuantities(request.pieces);
+  const { value: plan, ms } = timeRun(() => runNest(request, engine, onProgress));
+  return { engine, plan, score: scorePlan(plan, expanded, ms) };
+};
+
+/**
+ * Run every engine over the same request and rank the results.
+ *
+ * Best first, by `compareScores`. This is the point of a shared request shape:
+ * two engines can be handed identical work and judged on the same numbers.
+ *
+ * Sequential rather than parallel — they are CPU-bound and synchronous, so
+ * running them at once would only interleave badly and make the timings lie.
+ */
+export const compareEngines = (
+  request: NestRequest,
+  engines: readonly NestEngine[] = NEST_ENGINES,
+): ScoredRun[] =>
+  engines
+    .map((engine) => runScored(request, engine))
+    .sort((a, b) => {
+      const byScore = compareScores(a.score, b.score);
+      // Ties keep the declared engine order, so the winner never depends on
+      // which of two equal plans happened to be scored first.
+      return byScore !== 0 ? byScore : engines.indexOf(a.engine) - engines.indexOf(b.engine);
+    });
 
 /* --- Boundaries ---------------------------------------------------------- */
 
