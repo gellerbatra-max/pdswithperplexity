@@ -76,12 +76,29 @@ export const runNestWorker = (options: NestRunOptions): NestRun => {
       finish(() => reject(new Error(event.message || 'Nest worker failed to start')));
     };
 
+    // A reply that cannot be deserialised arrives here rather than at
+    // `onmessage`. Without this the run has been answered and nobody heard it,
+    // and the caller waits out the full timeout for a worker that is done.
+    worker.onmessageerror = () => {
+      finish(() => reject(new Error('Auto-nest sent a reply that could not be read')));
+    };
+
     const message: NestWorkerRequest = {
       type: 'NEST',
       request: options.request,
       mode: options.mode,
     };
-    worker.postMessage(message);
+    try {
+      worker.postMessage(message);
+    } catch (error) {
+      // A request that will not structured-clone throws synchronously. Route
+      // it through `finish` so the worker is terminated: throwing straight out
+      // of the executor rejects the promise but leaves the worker running with
+      // nothing listening to it.
+      finish(() =>
+        reject(error instanceof Error ? error : new Error('Auto-nest could not start')),
+      );
+    }
   });
 
   return {

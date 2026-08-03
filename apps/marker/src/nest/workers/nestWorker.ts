@@ -18,9 +18,25 @@ const post = (message: NestWorkerResponse): void => {
   self.postMessage(message);
 };
 
+/** Enough to name what arrived, without putting a caller's payload in a string. */
+const describeType = (message: unknown): string => {
+  if (message === null || typeof message !== 'object') return typeof message;
+  const type = (message as { type?: unknown }).type;
+  return typeof type === 'string' ? type : 'untyped';
+};
+
 self.onmessage = (event: MessageEvent<NestWorkerRequest>) => {
   const message = event.data;
-  if (message.type !== 'NEST') return;
+  if (message?.type !== 'NEST') {
+    // Answer rather than ignore. The runner cannot tell "still searching" from
+    // "will never reply", so silently dropping a message it does not
+    // understand cost the caller the whole timeout before anything surfaced.
+    post({
+      type: 'ERROR',
+      message: `Nest worker cannot handle a ${describeType(message)} message`,
+    });
+    return;
+  }
 
   try {
     // Progress ticks once per piece placed, which is the only boundary either
