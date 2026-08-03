@@ -21,6 +21,7 @@ import { orientPoints } from '@/canvas/collision/orient';
 import { nest, type NestInput, type NestResult } from './heuristic';
 import {
   expandQuantities,
+  hazardsOf,
   nestPieceFrom,
   obstacleFromZone,
   type NestEffort,
@@ -227,7 +228,10 @@ export const runScored = (
 ): ScoredRun => {
   const expanded = expandQuantities(request.pieces);
   const { value: plan, ms } = timeRun(() => runNest(request, engine, onProgress));
-  return { engine, plan, score: scorePlan(plan, expanded, ms) };
+  // The request's obstacles and spacing go to the scorer as well as the
+  // engine. Judging a plan without them marks a piece laid over a defect as
+  // perfectly safe, which is how `best` can pick the one plan nobody can cut.
+  return { engine, plan, score: scorePlan(plan, expanded, ms, hazardsOf(request)) };
 };
 
 /**

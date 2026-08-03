@@ -134,6 +134,34 @@ export interface NestRequest {
   readonly effort: NestEffort;
 }
 
+/**
+ * What a plan has to be safe *against*.
+ *
+ * A `NestPlan` says where the pieces went; it does not say what the fabric had
+ * on it or how much clearance the knife needs. Both are inputs, so they stay
+ * inputs rather than being copied onto the output where they could drift from
+ * the request the engine actually ran. Scoring takes them as a separate
+ * argument for the same reason the engines take them: a plan cannot be judged
+ * safe against constraints nobody handed to the judge.
+ *
+ * `spliceLines` are deliberately absent. A splice is a rule about where a
+ * piece may *start*, which the engines enforce while placing; it is not a
+ * region of fabric, so there is nothing here for stability to measure.
+ */
+export interface NestHazards {
+  readonly obstacles: readonly NestObstacle[];
+  readonly spacing: SpacingRules;
+}
+
+/** Nothing on the fabric and no clearance asked for. */
+export const NO_HAZARDS: NestHazards = { obstacles: [], spacing: NO_SPACING };
+
+/** The hazards an engine was given, for scoring the plan it gave back. */
+export const hazardsOf = (request: NestRequest): NestHazards => ({
+  obstacles: request.obstacles,
+  spacing: request.spacing,
+});
+
 /* --- Output -------------------------------------------------------------- */
 
 /**

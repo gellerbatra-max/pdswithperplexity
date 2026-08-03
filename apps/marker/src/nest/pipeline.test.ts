@@ -611,3 +611,58 @@ describe('the agreed naming and mapping', () => {
     expect(shelf.placements).not.toEqual(blf.placements);
   });
 });
+
+describe('scoring sees what the request carried', () => {
+  const strips = [
+    { polygon: rect(200, 43.5) },
+    { polygon: translate(rect(200, 35), { x: 0, y: 65 }) },
+  ];
+  // A 20x20 piece, two defect strips, and a clear lane at y 43.5–65.
+  const fouling = request({
+    pieces: [piece('a', 20, 20)],
+    spacing: { betweenPieces: 0, fromEdge: 10 },
+    obstacles: strips,
+  });
+
+  const foulsAnObstacle = (run: ReturnType<typeof runScored>): boolean =>
+    run.plan.placements.some((placement) =>
+      strips.some((strip) =>
+        satCollision(outlineOf(placement, [piece('a', 20, 20)]), strip.polygon).collides,
+      ),
+    );
+
+  it.each(NEST_ENGINES)('rates %s unsafe exactly when its plan fouls an obstacle', (engine) => {
+    // The invariant, not a snapshot of either engine's current behaviour: a
+    // plan that lands on a defect must not score as safe. Before the request's
+    // obstacles reached the scorer this was 1 either way, because stability
+    // only ever compared placements with the sheet and each other.
+    const run = runScored(fouling, engine);
+    expect(run.score.stability < 1).toBe(foulsAnObstacle(run));
+  });
+
+  it('does not elect an unsafe plan in best mode', () => {
+    // The payoff: whichever engine fouls the strip loses the stability gate,
+    // so `best` cannot hand back the one marker nobody can cut.
+    const best = runMode(fouling, 'best');
+    expect(foulsAnObstacle(best)).toBe(false);
+    expect(best.score.stability).toBe(1);
+  });
+
+  it('leaves a plan that clears the obstacles scoring a clean 1', () => {
+    // Same strips without the selvedge margin: both engines route around them,
+    // and the stricter scorer must not invent a fault that is not there.
+    const clear = request({ pieces: [piece('a', 20, 20)], obstacles: strips });
+    for (const engine of NEST_ENGINES) {
+      expect(runScored(clear, engine).score.stability).toBe(1);
+    }
+  });
+
+  it('counts what landed, so an empty plan is not mistaken for a marker', () => {
+    const empty = runScored(request({ pieces: [] }), 'heuristic');
+    expect(empty.score.placementCount).toBe(0);
+
+    const laid = runScored(request({ pieces: [piece('a', 20, 20)] }), 'heuristic');
+    expect(laid.score.placementCount).toBe(1);
+    expect(compareScores(laid.score, empty.score)).toBeLessThan(0);
+  });
+});
