@@ -1375,6 +1375,66 @@ first, and therefore what BLF means. Not a speed-up; a different engine.
 `heuristicGolden.test.ts` pins the placements captured before this work.
 Shelf never scans and has none of this.
 
+### Outstanding
+
+Measured against the tree, not inferred from the spec. Everything Phase 4
+names above is implemented and tested, so what follows is defects in shipped
+code, not missing features. Correctness first, then coverage.
+
+The menu is settled and nothing here reopens it: three modes, `shelf` →
+Shelf, `heuristic` → Bottom-left fill, `best` → both ranked by
+`compareScores`. Default is `heuristic` at effort 3 (`uiStore`).
+
+**Bottom-left fill scaling is no longer the headline.** `nest/spatialIndex.ts`
+landed and `satCollision` was rewritten to stop allocating; see the section
+above for the measured numbers. What remains there is the position count,
+which is an engine-definition question rather than a defect. The four items
+below are defects.
+
+**1. A splice line can make Shelf place nothing.** `shelfStarts`
+(`nest/shelf.ts`) seeds its candidate set with `from` plus each obstacle's
+`maxX`, and never with a splice x. `straddlesSplice` then vetoes every
+position it does offer, so a piece longer than the run-up to the first splice
+is unplaceable anywhere on the roll. Measured: 100 cm roll, one splice at
+x=20, eight 40×25 half-turn pieces — 0 placed, 8 unplaced, length 0.
+Bottom-left fill placed all eight. The existing test cannot catch this: it
+loops over `plan.placements`, which is empty, so the assertion body never
+runs. Fix `shelfStarts`, and assert a placement count before iterating.
+
+**2. The bottom-left fill scan ceiling can stop short.** `maxX =
+markerLength + widest candidate + SCAN_MARGIN` in `nest/heuristic.ts`, and
+`markerLength` is seeded only from `input.placed`. Splice lines never raise
+it, so the scan can end before the first legal position and the piece is
+reported unplaced. Measured: one 30×30 half-turn piece on empty 100 cm fabric
+with splices at x=1…40 returns no placements and `unplaced: ['a']`, though
+x=40 is legal. When it fires nothing is placed at all, so the ceiling never
+grows and every subsequent piece reports unplaced too. The ceiling has to
+account for splice positions and obstacle extents, not just pre-placed
+pieces. Unaffected by the spatial index — this is the loop bound, not the
+cost per position.
+
+**3. The scorer cannot see obstacles or spacing.** `NestPlan` carries neither
+an obstacle list nor the `SpacingRules`, so `stabilityOf` (`nest/scoring.ts`)
+checks placements against the sheet and against each other, and nothing else.
+Defect zones, the cutter buffer and the selvedge margin are all invisible to
+it. Because `compareScores` gates on stability first, `best` can elect a plan
+that puts a piece over a defect and report `stability: 1` — verified end to
+end. Carry `obstacles` and `spacing` on the plan, or pass the `NestRequest`
+into `scorePlan`, and extend `stabilityOf` to test both. This one comes first
+in practice: the other defects produce plans the current scorer certifies as
+perfect, so it is the harness the rest are verified with.
+
+**4. The worker layer has no coverage.** No test file exists for
+`nest/nestRunner.ts`, `nest/nestProtocol.ts` or `nest/workers/nestWorker.ts`,
+and none can under the current `environment: 'node'`, where `Worker` is
+undefined. The timeout, cancel-by-terminate and error propagation are
+verified by nothing. Two silent hangs live in that gap: `nestWorker` ignores
+any message whose type is not `'NEST'`, and `nestRunner` installs no
+`onmessageerror`, so a structured-clone failure is equally silent — either
+leaves the UI on its last progress percentage for the full timeout. Nothing
+cancels an in-flight run when `AutoNestButton` unmounts. Needs a DOM test
+project with a `Worker` stub, plus `onmessageerror` and an unmount cleanup.
+
 ---
 
 ## Replying to Claude After Each Step
