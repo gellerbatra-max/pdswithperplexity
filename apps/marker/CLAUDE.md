@@ -1377,9 +1377,11 @@ Shelf never scans and has none of this.
 
 ### Outstanding
 
-**No open engine defects.** Measured against the tree, not inferred from the
-spec: everything Phase 4 names above is implemented, and every defect this list
-carried is fixed, each with regression tests that fail when its fix is removed.
+**Nothing open.** Measured against the tree, not inferred from the spec:
+everything Phase 4 names above is implemented, every defect this list carried is
+fixed with regression tests that fail when its fix is removed, and the one item
+that was never an engine defect — cancelling an in-flight run when
+`AutoNestButton` unmounts — is implemented too.
 
 The menu is settled and nothing here reopens it: three modes, `shelf` →
 Shelf, `heuristic` → Bottom-left fill, `best` → both ranked by
@@ -1413,11 +1415,6 @@ which is an engine-definition question rather than a defect.
   `nestRunner` gained `onmessageerror` and a guard around `postMessage`;
   `nestWorker` answers a message it cannot handle with an `ERROR` rather than
   going quiet.
-
-**Open, and not an engine defect.** Nothing cancels an in-flight run when
-`AutoNestButton` unmounts, so an abandoned run keeps a worker busy until it
-finishes or times out. That is a component-lifecycle fix, and the vitest
-`include` is `src/**/*.test.ts`, so it has no test home today.
 
 ---
 
