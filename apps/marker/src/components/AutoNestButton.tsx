@@ -77,6 +77,22 @@ export const AutoNestButton = () => {
     };
   }, [open]);
 
+  /**
+   * Stop an in-flight run when this button goes away.
+   *
+   * A run outlives the component otherwise. The worker keeps searching, and
+   * its result is applied through `useMarkerStore.getState()`, which is still
+   * there — but this button unmounts when the marker closes, so that result
+   * belongs to a document the user has left, and could land on the next one
+   * they open.
+   *
+   * `cancelRef` is null except while a run is in flight, so this is a no-op
+   * both for the StrictMode remount in development and for any unmount after
+   * a run has already settled. Cancelling a settled run cannot take back its
+   * result in any case — `nestRunner` guards that, and its tests pin it.
+   */
+  useEffect(() => () => cancelRef.current?.(), []);
+
   const start = useCallback(async () => {
     const marker = useMarkerStore.getState().document;
     const ui = useUiStore.getState();
