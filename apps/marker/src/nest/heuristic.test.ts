@@ -166,6 +166,9 @@ describe('obstacles', () => {
     const pieces = [tray('a', rect(30, 30)), tray('b', rect(30, 30))];
     const result = nest(input({ pieces, spliceLines: [{ id: 's1', x: 20 }] }));
 
+    // Assert it placed before asserting it placed legally: this loop is
+    // vacuous over an empty plan, so "placed nothing" would pass it silently.
+    expect(result.placements).toHaveLength(2);
     for (const shape of polygons(result.placements, pieces)) {
       const xs = shape.map((point) => point.x);
       const straddles = Math.min(...xs) < 20 && Math.max(...xs) > 20;
@@ -182,6 +185,114 @@ describe('obstacles', () => {
     if (!first || !second) throw new Error('expected two placements');
     // Side by side along x, so the gap between them is the buffer.
     expect(Math.abs(second.position.x - first.position.x)).toBeGreaterThanOrEqual(41 - 1e-6);
+  });
+});
+
+describe('the scan ceiling and splice lines', () => {
+  /** A splice at every centimetre from 1 to n — no gap wider than 1. */
+  const splicesTo = (n: number) =>
+    Array.from({ length: n }, (_, index) => ({ id: `s${index + 1}`, x: index + 1 }));
+
+  const straddlesAny = (
+    shapes: readonly Point[][],
+    splices: readonly { readonly x: number }[],
+  ): boolean =>
+    shapes.some((shape) => {
+      const xs = shape.map((point) => point.x);
+      const [left, right] = [Math.min(...xs), Math.max(...xs)];
+      return splices.some((splice) => left < splice.x && right > splice.x);
+    });
+
+  it('reaches a legal position past a run of splices', () => {
+    // The verified repro. `markerLength` is 0 on empty fabric and splices never
+    // raised it, so the scan stopped at 0 + 30 + 1 = 31 — four centimetres
+    // short of x=40, the first position that does not straddle anything.
+    const pieces = [tray('a', rect(30, 30))];
+    const splices = splicesTo(40);
+    const result = nest(input({ pieces, spliceLines: splices }));
+
+    expect(result.unplaced).toEqual([]);
+    expect(result.placements).toHaveLength(1);
+    expect(result.placements[0]?.position.x).toBe(40);
+    expect(straddlesAny(polygons(result.placements, pieces), splices)).toBe(false);
+  });
+
+  it('keeps placing once the first piece has cleared the splices', () => {
+    // Nothing landed before, so `markerLength` stayed 0 and every later piece
+    // hit the same short ceiling. All four have to find a home now.
+    const pieces = Array.from({ length: 4 }, (_, index) => tray(`p${index}`, rect(30, 30)));
+    const splices = splicesTo(40);
+    const result = nest(input({ pieces, spliceLines: splices }));
+
+    expect(result.unplaced).toEqual([]);
+    expect(result.placements).toHaveLength(4);
+    expect(straddlesAny(polygons(result.placements, pieces), splices)).toBe(false);
+    expect(result.placements.every((placement) => placement.position.x >= 40)).toBe(true);
+  });
+
+  it('leaves a piece that fits before the splices exactly where it was', () => {
+    // Splices at 40 and 80 leave a 40 cm run from zero, so a 30 cm piece still
+    // belongs at the origin. A wider ceiling must not move anything.
+    const pieces = [tray('a', rect(30, 30))];
+    const splices = [{ id: 'a', x: 40 }, { id: 'b', x: 80 }];
+    const withSplices = nest(input({ pieces, spliceLines: splices }));
+    const without = nest(input({ pieces }));
+
+    expect(withSplices.placements).toHaveLength(1);
+    expect(withSplices.placements[0]?.position).toEqual({ x: 0, y: 0 });
+    expect(withSplices.placements).toEqual(without.placements);
+    expect(withSplices.markerLength).toBe(without.markerLength);
+  });
+
+  it('leaves a marker with no splices untouched', () => {
+    // `spliceLines` is empty on most requests, so the new term must be a no-op
+    // there — this is the engine's whole existing behaviour.
+    const pieces = [tray('a', rect(40, 25)), tray('b', rect(30, 40)), tray('c', rect(25, 25))];
+    const result = nest(input({ pieces }));
+
+    expect(result.placements).toHaveLength(3);
+    expect(result.placements.every((placement) => placement.position.x === 0)).toBe(true);
+  });
+
+  it('takes the earliest legal position, not merely one that is reachable', () => {
+    // A wider ceiling must not turn bottom-left fill into "anywhere it fits":
+    // the gap between 30 and 60 holds a 25 cm piece, so it goes there rather
+    // than past the last splice.
+    const pieces = [tray('a', rect(25, 25))];
+    const splices = [{ id: 'a', x: 10 }, { id: 'b', x: 30 }, { id: 'c', x: 60 }];
+    const result = nest(input({ pieces, spliceLines: splices }));
+
+    expect(result.placements[0]?.position.x).toBe(30);
+    expect(straddlesAny(polygons(result.placements, pieces), splices)).toBe(false);
+  });
+
+  it('is deterministic across repeated runs', () => {
+    const pieces = Array.from({ length: 3 }, (_, index) => tray(`p${index}`, rect(30, 30)));
+    const build = () => nest(input({ pieces, spliceLines: splicesTo(40) }));
+    expect(build()).toEqual(build());
+  });
+
+  it('still reports unplaced when the piece cannot cross the fabric', () => {
+    // Not a relaxation: a wider scan cannot help a piece too big for the roll,
+    // and saying so is the right answer however far the ceiling reaches.
+    const pieces = [tray('a', rect(30, 30))];
+    const result = nest(input({ pieces, fabricWidth: 20, spliceLines: splicesTo(40) }));
+
+    expect(result.placements).toEqual([]);
+    expect(result.unplaced).toEqual(['a']);
+  });
+
+  it('reaches past a long run of splices rather than a fixed distance', () => {
+    // Ten times the repro's run. The ceiling tracks the last splice, so the
+    // piece still finds the clear fabric beyond it — there is always some,
+    // because a splice constrains only the fabric before it.
+    const pieces = [tray('a', rect(30, 30))];
+    const splices = splicesTo(400);
+    const result = nest(input({ pieces, spliceLines: splices }));
+
+    expect(result.unplaced).toEqual([]);
+    expect(result.placements[0]?.position.x).toBe(400);
+    expect(straddlesAny(polygons(result.placements, pieces), splices)).toBe(false);
   });
 });
 

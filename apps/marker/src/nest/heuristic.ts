@@ -242,6 +242,24 @@ export const nest = (input: NestInput, onProgress?: NestProgress): NestResult =>
     );
   });
 
+  /**
+   * The furthest along the roll a splice can push a legal start.
+   *
+   * `markerLength` only ever measures fabric something is lying on, so it does
+   * not see splices — a splice occupies nothing. But a piece that fits in no
+   * gap between splices has to begin at or after the last one, and scanning to
+   * `markerLength + width` would stop short of it and call the piece unplaced
+   * with clear fabric past the splice never tried.
+   *
+   * Beyond the last splice nothing constrains the piece, so reaching one full
+   * piece-width past it is enough. Computed once: splices do not move during a
+   * run.
+   */
+  const spliceReach = input.spliceLines.reduce(
+    (furthest, splice) => Math.max(furthest, splice.x),
+    0,
+  );
+
   const placements: NestPlacement[] = [];
   const unplaced: string[] = [];
   let placedArea = 0;
@@ -262,7 +280,8 @@ export const nest = (input: NestInput, onProgress?: NestProgress): NestResult =>
     // against what shares a cell with it rather than against everything placed
     // so far. Positions still scale with effort squared; what no longer scales
     // is the cost of each one.
-    const maxX = markerLength + Math.max(...candidates.map((c) => c.bounds.maxX - c.bounds.minX)) +
+    const maxX = Math.max(markerLength, spliceReach) +
+      Math.max(...candidates.map((c) => c.bounds.maxX - c.bounds.minX)) +
       SCAN_MARGIN;
 
     for (let x = 0; x <= maxX && !landed; x += step) {
