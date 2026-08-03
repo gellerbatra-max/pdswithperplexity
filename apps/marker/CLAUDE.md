@@ -649,6 +649,24 @@ Auto-save strategy:
   `nest/heuristic.ts` must have a Vitest unit test before that
   step is considered complete.
 
+### What the test setup covers, and what it does not
+
+Vitest runs with `environment: 'node'` and `include: ['src/**/*.test.ts']`.
+That reaches every pure module — `marker/`, `nest/`, `canvas/collision/`,
+`commands/`, `store/` — which is where the logic lives, and is the practical
+reason those modules are required to stay React-free.
+
+It does not reach React components. `.tsx` is outside `include`, there is no
+DOM environment, and neither Testing Library nor jsdom is installed, so a
+component has nowhere to be rendered. Render output, effects and component
+lifecycle are therefore verified by reading the code, not by a test.
+
+This is a tooling boundary, not a product defect, and no component behaviour
+is known to be wrong because of it. Where a component owns behaviour worth
+pinning, put that behaviour in a pure module and test it there: `nestRunner`'s
+cancel, timeout and settle-once rules are covered that way, and
+`AutoNestButton` only calls into them.
+
 ---
 
 ## Git Commit Rule (mandatory after every step)
