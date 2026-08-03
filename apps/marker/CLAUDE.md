@@ -1388,8 +1388,29 @@ Shelf, `heuristic` → Bottom-left fill, `best` → both ranked by
 **Bottom-left fill scaling is no longer the headline.** `nest/spatialIndex.ts`
 landed and `satCollision` was rewritten to stop allocating; see the section
 above for the measured numbers. What remains there is the position count,
-which is an engine-definition question rather than a defect. The four items
+which is an engine-definition question rather than a defect. The two items
 below are defects.
+
+**Closed since this list was written.** The scorer takes the request's
+obstacles and spacing as `NestHazards`, so `stabilityOf` faults a piece laid
+over a defect, inside the selvedge margin, or closer to a neighbour than the
+cutter buffer, and `compareScores` no longer lets a plan that laid nothing win
+on vacuous safety. `toHeuristicInput` shifts obstacles into the engine's band
+space, so pieces and obstacles are compared in one frame at any `fromEdge` —
+the case that used to lay a piece 11 cm into a defect strip now lands it in
+the clear lane.
+
+**Worker protocol coverage is done.** `nest/nestRunner.test.ts` and
+`nest/workers/nestWorker.test.ts` cover the path without a DOM, by stubbing
+`Worker` and `self` rather than adding a test environment. Covered:
+successful completion and the `ScoredRun` shape that crosses the boundary,
+progress forwarding, the timeout including the 300 s default on fake timers,
+cancel — terminates, idempotent, and cannot take back a delivered result —
+and malformed messages, which now draw an `ERROR` rather than silence.
+`nestRunner` gained `onmessageerror` and a guard around `postMessage`, so
+neither an unreadable reply nor an uncloneable request can hang a run for the
+full timeout. One gap left, on the UI side rather than the engine: nothing
+cancels an in-flight run when `AutoNestButton` unmounts.
 
 **1. A splice line can make Shelf place nothing.** `shelfStarts`
 (`nest/shelf.ts`) seeds its candidate set with `from` plus each obstacle's
@@ -1413,27 +1434,9 @@ account for splice positions and obstacle extents, not just pre-placed
 pieces. Unaffected by the spatial index — this is the loop bound, not the
 cost per position.
 
-**3. The scorer cannot see obstacles or spacing.** `NestPlan` carries neither
-an obstacle list nor the `SpacingRules`, so `stabilityOf` (`nest/scoring.ts`)
-checks placements against the sheet and against each other, and nothing else.
-Defect zones, the cutter buffer and the selvedge margin are all invisible to
-it. Because `compareScores` gates on stability first, `best` can elect a plan
-that puts a piece over a defect and report `stability: 1` — verified end to
-end. Carry `obstacles` and `spacing` on the plan, or pass the `NestRequest`
-into `scorePlan`, and extend `stabilityOf` to test both. This one comes first
-in practice: the other defects produce plans the current scorer certifies as
-perfect, so it is the harness the rest are verified with.
-
-**4. The worker layer has no coverage.** No test file exists for
-`nest/nestRunner.ts`, `nest/nestProtocol.ts` or `nest/workers/nestWorker.ts`,
-and none can under the current `environment: 'node'`, where `Worker` is
-undefined. The timeout, cancel-by-terminate and error propagation are
-verified by nothing. Two silent hangs live in that gap: `nestWorker` ignores
-any message whose type is not `'NEST'`, and `nestRunner` installs no
-`onmessageerror`, so a structured-clone failure is equally silent — either
-leaves the UI on its last progress percentage for the full timeout. Nothing
-cancels an in-flight run when `AutoNestButton` unmounts. Needs a DOM test
-project with a `Worker` stub, plus `onmessageerror` and an unmount cleanup.
+Both are splice-line defects, and neither is masked any more: a plan that laid
+nothing now loses to one that laid something, and what went unplaced is on the
+score. Each has a signal to be fixed against.
 
 ---
 
