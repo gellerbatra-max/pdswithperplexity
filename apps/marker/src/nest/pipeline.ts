@@ -96,17 +96,28 @@ const asTrayPiece = (piece: NestPiece): TrayPiece => ({
 /**
  * An obstacle polygon as a piece already lying on the fabric.
  *
- * The polygon is already in marker space, so the piece gets the identity
- * transform: no flip, no rotation, no offset. `nest()` applies
- * flip → rotate → translate to every obstacle, and identity is what makes
- * that a no-op.
+ * The polygon is in marker space; the engine packs in band space, whose origin
+ * sits `fromEdge` across the fabric (see `toHeuristicInput`). Taking `fromEdge`
+ * off the y puts the obstacle in the frame the engine is placing into.
+ *
+ * The shift rides on `position` rather than on a rewritten polygon because
+ * `nest()` already applies flip → rotate → translate to every obstacle. No
+ * flip and no rotation, so translate is the whole transform, and the geometry
+ * stays the caller's own array.
  */
-const asPlacedObstacle = (obstacle: NestObstacle, index: number): PlacedPiece => ({
+const asPlacedObstacle = (
+  obstacle: NestObstacle,
+  index: number,
+  fromEdge: number,
+): PlacedPiece => ({
   ...UNREAD_BY_ENGINE,
   id: `obstacle-${index}`,
   pieceDefId: `obstacle-${index}`,
   geometry: [...obstacle.polygon],
-  position: { x: 0, y: 0 },
+  // Spelled out rather than `-fromEdge`, which is -0 at no margin. The two
+  // translate a polygon identically, but only one of them still reads as the
+  // identity transform this is documented to be when there is no band.
+  position: { x: 0, y: fromEdge === 0 ? 0 : -fromEdge },
   rotation: 0,
   flipped: false,
   placed: true,
@@ -116,9 +127,30 @@ const asPlacedObstacle = (obstacle: NestObstacle, index: number): PlacedPiece =>
 /**
  * Translate a request into what bottom-left fill expects.
  *
+ * **Frames.** Bottom-left fill has no concept of a selvedge margin, so the
+ * margin is applied by handing it a narrower sheet: *band space* is marker
+ * space moved `fromEdge` across the fabric, `usableWidth` wide. Everything
+ * crossing this boundary has to be converted, and there are exactly three
+ * things that do:
+ *
+ * - **Pieces** are outlines at the origin, so they carry no frame. The engine
+ *   places them in band space and `planFromHeuristic` adds `fromEdge` back.
+ * - **Obstacles** arrive in marker space and are shifted down by `fromEdge`,
+ *   in `asPlacedObstacle`.
+ * - **Splice lines** are positions along the length, and the band only moves
+ *   across the width, so they pass through untouched.
+ *
+ * Miss the obstacle shift and the engine compares band-space pieces against
+ * marker-space obstacles: everything is out by `fromEdge`, and it lays pieces
+ * on defects while believing the fabric is clear. At `fromEdge: 0` the two
+ * frames coincide and every conversion here is the identity.
+ *
  * Every obstacle becomes a pre-placed piece rather than a defect zone, because
  * a `DefectZone` is an axis-aligned rectangle and an obstacle is any polygon —
- * routing an outline through a rectangle would quietly enlarge it.
+ * routing an outline through a rectangle would quietly enlarge it. It also
+ * keeps the shift in one place: a `DefectZone` has no position to offset, so
+ * expressing it as a placed piece is what makes the frame conversion possible
+ * without rewriting anyone's coordinates.
  *
  * That choice costs two numbers `nest()` reports and this pipeline does not
  * use: obstacle area lands in its `utilization`, and a far-flung obstacle
@@ -129,7 +161,9 @@ const asPlacedObstacle = (obstacle: NestObstacle, index: number): PlacedPiece =>
 export const toHeuristicInput = (request: NestRequest): NestInput => ({
   pieces: expandQuantities(request.pieces).map(asTrayPiece),
   fabricWidth: usableWidth(request.sheet, request.spacing),
-  placed: request.obstacles.map(asPlacedObstacle),
+  placed: request.obstacles.map((obstacle, index) =>
+    asPlacedObstacle(obstacle, index, request.spacing.fromEdge),
+  ),
   defectZones: [],
   spliceLines: [...request.spliceLines],
   effort: request.effort,
@@ -139,9 +173,9 @@ export const toHeuristicInput = (request: NestRequest): NestInput => ({
 /**
  * The band a piece may occupy across the fabric.
  *
- * Bottom-left fill has no concept of a selvedge margin, so the margin is
- * applied by shrinking the width it is given and shifting the result back.
- * Taking it off both edges is what the shelf engine does, so the two agree.
+ * Taking the margin off both edges is what the shelf engine does, so the two
+ * agree. Never negative: a margin wider than the roll leaves no band, not an
+ * inverted one.
  */
 const usableWidth = (sheet: NestSheet, spacing: SpacingRules): number =>
   Math.max(0, sheet.width - spacing.fromEdge * 2);

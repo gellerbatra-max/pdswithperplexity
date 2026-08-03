@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { boundsOf } from '@/canvas/collision/aabb';
 import { satCollision } from '@/canvas/collision/sat';
 import { orientPoints } from '@/canvas/collision/orient';
 import { translate } from '@/marker/pieceGeometry';
@@ -199,6 +200,33 @@ describe('the heuristic adapter', () => {
     expect(input.placed[0]?.rotation).toBe(0);
     expect(input.placed[0]?.flipped).toBe(false);
     expect(input.placed[0]?.geometry).toEqual(rect(30, 40));
+  });
+
+  it('shifts obstacles into band space when there is a selvedge margin', () => {
+    // The engine packs into a band that starts `fromEdge` across the fabric,
+    // so a marker-space obstacle has to come down by the same amount or the
+    // two are describing different fabric.
+    const input = toHeuristicInput(
+      request({
+        obstacles: [{ polygon: rect(30, 40) }],
+        spacing: { betweenPieces: 0, fromEdge: 12 },
+      }),
+    );
+    expect(input.placed[0]?.position).toEqual({ x: 0, y: -12 });
+    // The polygon itself is untouched — the shift rides on the transform.
+    expect(input.placed[0]?.geometry).toEqual(rect(30, 40));
+    expect(input.placed[0]?.rotation).toBe(0);
+    expect(input.placed[0]?.flipped).toBe(false);
+  });
+
+  it('leaves splice lines alone, since the band only moves across the width', () => {
+    const input = toHeuristicInput(
+      request({
+        spliceLines: [{ id: 's1', x: 40 }],
+        spacing: { betweenPieces: 0, fromEdge: 12 },
+      }),
+    );
+    expect(input.spliceLines).toEqual([{ id: 's1', x: 40 }]);
   });
 
   it('carries the cutter buffer across', () => {
@@ -664,5 +692,117 @@ describe('scoring sees what the request carried', () => {
     const laid = runScored(request({ pieces: [piece('a', 20, 20)] }), 'heuristic');
     expect(laid.score.placementCount).toBe(1);
     expect(compareScores(laid.score, empty.score)).toBeLessThan(0);
+  });
+});
+
+describe('one coordinate frame across the heuristic path', () => {
+  // Two defect strips with a clear lane at y 43.5–65, and a 20x20 piece. The
+  // only legal home is that lane, whatever the selvedge margin is.
+  const strips = [
+    { polygon: rect(200, 43.5) },
+    { polygon: translate(rect(200, 35), { x: 0, y: 65 }) },
+  ];
+  const fouls = (plan: { placements: readonly NestPlacement[] }, pieces: NestPiece[]): boolean =>
+    plan.placements.some((placement) =>
+      strips.some(
+        (strip) => satCollision(outlineOf(placement, pieces), strip.polygon).collides,
+      ),
+    );
+
+  it('lands the verified repro in the clear lane instead of on the strip', () => {
+    // The bug: the engine packed in band space while obstacles stayed in
+    // marker space, so every comparison was out by `fromEdge`. It put this
+    // piece at y 54 — 11 cm into the far strip — and reported it placed.
+    const pieces = [piece('a', 20, 20)];
+    const run = runScored(
+      request({ pieces, spacing: { betweenPieces: 0, fromEdge: 10 }, obstacles: strips }),
+      'heuristic',
+    );
+    expect(run.plan.placements).toEqual([
+      { pieceId: 'a', position: { x: 0, y: 44 }, rotation: 0, flipped: false },
+    ]);
+    expect(fouls(run.plan, pieces)).toBe(false);
+    expect(run.score.stability).toBe(1);
+  });
+
+  it('leaves the zero-margin case exactly where it was', () => {
+    // At no margin the frames coincide, so this placement is the one the
+    // engine has always produced and must keep producing.
+    const pieces = [piece('a', 20, 20)];
+    const run = runScored(request({ pieces, obstacles: strips }), 'heuristic');
+    expect(run.plan.placements).toEqual([
+      { pieceId: 'a', position: { x: 0, y: 44 }, rotation: 0, flipped: false },
+    ]);
+    expect(run.score.stability).toBe(1);
+  });
+
+  it.each([0, 5, 10, 20, 30])('keeps clear of the strips at a %d cm margin', (fromEdge) => {
+    const pieces = [piece('a', 20, 20)];
+    const run = runScored(
+      request({ pieces, spacing: { betweenPieces: 0, fromEdge }, obstacles: strips }),
+      'heuristic',
+    );
+    // Assert it placed before asserting it placed well: an empty plan clears
+    // every strip trivially, and a vacuous pass here would hide the bug this
+    // test exists to catch.
+    expect(run.plan.placements).toHaveLength(1);
+    expect(fouls(run.plan, pieces)).toBe(false);
+    expect(run.score.stability).toBe(1);
+  });
+
+  it.each([0, 5, 10, 20])('keeps pieces inside the selvedge band at %d cm', (fromEdge) => {
+    const pieces = [piece('a', 20, 20), piece('b', 25, 25)];
+    const run = runScored(
+      request({ pieces, spacing: { betweenPieces: 0, fromEdge } }),
+      'heuristic',
+    );
+    expect(run.plan.placements.length).toBeGreaterThan(0);
+    for (const placement of run.plan.placements) {
+      const bounds = boundsOf(outlineOf(placement, pieces));
+      expect(bounds.minY).toBeGreaterThanOrEqual(fromEdge);
+      expect(bounds.maxY).toBeLessThanOrEqual(100 - fromEdge);
+    }
+  });
+
+  it('rejects a piece rather than squeezing it outside a band too narrow to hold it', () => {
+    // A 40 cm margin on a 100 cm roll leaves a 20 cm band; a 30 cm piece has
+    // nowhere legal to go, and saying so is the correct answer.
+    const run = runScored(
+      request({ pieces: [piece('a', 20, 30)], spacing: { betweenPieces: 0, fromEdge: 40 } }),
+      'heuristic',
+    );
+    expect(run.plan.placements).toEqual([]);
+    expect(run.plan.unplaced).toEqual(['a']);
+  });
+
+  it('agrees with the shelf engine about which fabric is usable', () => {
+    // Both engines take the margin off both edges, so neither may put a piece
+    // where the other would refuse to.
+    const pieces = [piece('a', 20, 20)];
+    for (const engine of NEST_ENGINES) {
+      const run = runScored(
+        request({ pieces, spacing: { betweenPieces: 0, fromEdge: 10 }, obstacles: strips }),
+        engine,
+      );
+      expect(run.plan.placements).toHaveLength(1);
+      expect(fouls(run.plan, pieces)).toBe(false);
+      for (const placement of run.plan.placements) {
+        const bounds = boundsOf(outlineOf(placement, pieces));
+        expect(bounds.minY).toBeGreaterThanOrEqual(10);
+        expect(bounds.maxY).toBeLessThanOrEqual(90);
+      }
+    }
+  });
+
+  it('picks the tighter marker now that the safe lane is reachable', () => {
+    // Before the fix `best` had to fall back to shelf, which skips past the
+    // strips entirely: x 200 against x 0 for the same single piece.
+    const pieces = [piece('a', 20, 20)];
+    const best = runMode(
+      request({ pieces, spacing: { betweenPieces: 0, fromEdge: 10 }, obstacles: strips }),
+      'best',
+    );
+    expect(best.score.stability).toBe(1);
+    expect(best.plan.length).toBe(20);
   });
 });
