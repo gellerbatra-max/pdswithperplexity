@@ -260,6 +260,9 @@ describe('collision rejection', () => {
     const plan = nestShelf(
       request({ pieces, spliceLines: [{ id: 's1', x: 20 }] }),
     );
+    // Assert it placed before assering it placed legally: this loop is vacuous
+    // over an empty plan, and "placed nothing" used to pass it silently.
+    expect(plan.placements).toHaveLength(1);
     for (const placement of plan.placements) {
       const xs = outlineOf(placement, pieces).map((p) => p.x);
       const straddles = Math.min(...xs) < 20 && Math.max(...xs) > 20;
@@ -274,5 +277,133 @@ describe('collision rejection', () => {
     const plan = nestShelf(request({ pieces, sheet: { width: 100, maxLength: 30 } }));
     expect(plan.placements).toHaveLength(1);
     expect(plan.unplaced).toEqual(['b']);
+  });
+});
+
+describe('opening a shelf against a splice line', () => {
+  const straddlesAny = (
+    plan: { placements: readonly NestPlacement[] },
+    pieces: readonly NestPiece[],
+    splices: readonly number[],
+  ): boolean =>
+    plan.placements.some((placement) => {
+      const xs = outlineOf(placement, pieces).map((point) => point.x);
+      const [left, right] = [Math.min(...xs), Math.max(...xs)];
+      return splices.some((splice) => left < splice && right > splice);
+    });
+
+  it('opens a shelf at the splice when the run-up is too short', () => {
+    // The verified repro. A splice 20 along and pieces 40 long: every start the
+    // engine used to offer straddled it, so it placed nothing at all — and with
+    // nothing placed the shelf never advanced, so all eight failed the same way
+    // while the fabric past the splice sat empty.
+    const pieces = Array.from({ length: 8 }, (_, index) => piece(`p${index}`, 40, 25));
+    const plan = nestShelf(request({ pieces, spliceLines: [{ id: 's1', x: 20 }] }));
+
+    expect(plan.placements).toHaveLength(8);
+    expect(plan.unplaced).toEqual([]);
+    expect(straddlesAny(plan, pieces, [20])).toBe(false);
+    expect(anyOverlap(plan, pieces)).toBe(false);
+    // Two shelves, both opening on legal ground: the splice, then past it.
+    expect([...new Set(plan.placements.map((placement) => placement.position.x))]).toEqual([20, 60]);
+  });
+
+  it('places a single piece past a splice it cannot span', () => {
+    const pieces = [piece('a', 40, 30)];
+    const plan = nestShelf(request({ pieces, spliceLines: [{ id: 's1', x: 20 }] }));
+
+    expect(plan.placements).toHaveLength(1);
+    expect(plan.unplaced).toEqual([]);
+    expect(plan.placements[0]?.position.x).toBe(20);
+  });
+
+  it('leaves a piece that fits before the splice exactly where it was', () => {
+    // The splice is present but not in the way: the piece ends on it, so the
+    // first start is still legal and the fix must not push it further along.
+    const pieces = [piece('a', 20, 30)];
+    const withSplice = nestShelf(request({ pieces, spliceLines: [{ id: 's1', x: 20 }] }));
+    const without = nestShelf(request({ pieces }));
+
+    expect(withSplice.placements).toHaveLength(1);
+    expect(withSplice.placements[0]?.position).toEqual({ x: 0, y: 0 });
+    expect(withSplice.placements).toEqual(without.placements);
+    expect(withSplice.length).toBe(without.length);
+  });
+
+  it('leaves a marker with no splices untouched', () => {
+    // `spliceLines` is empty on most requests, and the new starts must be a
+    // no-op there — this is the whole existing behaviour of the engine.
+    const pieces = [piece('a', 40, 25), piece('b', 30, 40), piece('c', 25, 25)];
+    const plan = nestShelf(request({ pieces }));
+
+    expect(plan.placements).toHaveLength(3);
+    expect(plan.placements.every((placement) => placement.position.x === 0)).toBe(true);
+    expect(anyOverlap(plan, pieces)).toBe(false);
+  });
+
+  it('walks past several splices to the first start that fits', () => {
+    // Starts are offered in ascending order, so the piece takes the earliest
+    // legal one rather than the furthest — a shorter marker, deterministically.
+    const pieces = Array.from({ length: 4 }, (_, index) => piece(`p${index}`, 30, 50));
+    const splices = [10, 25, 70];
+    const plan = nestShelf(
+      request({
+        pieces,
+        spliceLines: splices.map((x) => ({ id: `s${x}`, x })),
+      }),
+    );
+
+    expect(plan.placements).toHaveLength(4);
+    expect(straddlesAny(plan, pieces, splices)).toBe(false);
+    // x=10 leaves only 15 cm before the next splice, so 25 is the first start
+    // a 30-long piece can use.
+    expect([...new Set(plan.placements.map((placement) => placement.position.x))]).toEqual([25, 70]);
+  });
+
+  it('is deterministic across repeated runs', () => {
+    const pieces = Array.from({ length: 6 }, (_, index) => piece(`p${index}`, 35, 30));
+    const build = () =>
+      nestShelf(
+        request({
+          pieces,
+          spliceLines: [{ id: 'a', x: 15 }, { id: 'b', x: 55 }],
+        }),
+      );
+    expect(build()).toEqual(build());
+  });
+
+  it('still reports unplaced when there is genuinely nowhere legal', () => {
+    // Not a relaxation: the piece may still never cross the splice. A 50 cm
+    // ceiling leaves no run long enough on either side, so refusing is right.
+    const pieces = [piece('a', 40, 25)];
+    const plan = nestShelf(
+      request({
+        pieces,
+        sheet: { width: 100, maxLength: 50 },
+        spliceLines: [{ id: 's1', x: 20 }],
+      }),
+    );
+
+    expect(plan.placements).toEqual([]);
+    expect(plan.unplaced).toEqual(['a']);
+  });
+
+  it('still refuses a piece wider than the fabric, splice or not', () => {
+    const pieces = [piece('a', 20, 130)];
+    const plan = nestShelf(request({ pieces, spliceLines: [{ id: 's1', x: 20 }] }));
+
+    expect(plan.placements).toEqual([]);
+    expect(plan.unplaced).toEqual(['a']);
+  });
+
+  it('does not offer a splice behind the shelf it is opening past', () => {
+    // A splice already behind the current shelf is not a start: the fix adds
+    // forward starts only, so a marker cannot walk backwards.
+    const pieces = [piece('a', 15, 60), piece('b', 15, 60)];
+    const plan = nestShelf(request({ pieces, spliceLines: [{ id: 's1', x: 5 }] }));
+
+    expect(plan.placements).toHaveLength(2);
+    const xs = plan.placements.map((placement) => placement.position.x);
+    expect([...xs]).toEqual([...xs].sort((a, b) => a - b));
   });
 });

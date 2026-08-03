@@ -163,16 +163,30 @@ export const nestShelf = (request: NestRequest, onProgress?: NestProgress): Nest
   /**
    * Where a new shelf could start, in order.
    *
-   * Past the current shelf, and then past the far edge of anything in the way.
-   * A new shelf is not automatically clear fabric — a defect zone or a
-   * pre-placed piece can sit right where it would open — so the starts a piece
-   * is offered have to include the points where each obstruction ends.
-   * Bounded by the obstacle count, so this stays linear rather than a scan.
+   * Past the current shelf, and then past whatever is in the way. A new shelf
+   * is not automatically clear fabric — a defect zone or a pre-placed piece can
+   * sit right where it would open — so the starts a piece is offered have to
+   * include the points where each obstruction ends.
+   *
+   * A splice line obstructs differently: it occupies no fabric, but no piece
+   * may cross it, so it ends the usable run before it just as surely. The point
+   * it stops obstructing is its own x — a piece whose left edge sits exactly on
+   * a splice does not straddle it. Without these, a splice closer to the shelf
+   * than the piece is long makes every offered start straddle, and the piece is
+   * reported unplaced with clear fabric past the splice never tried. Nothing is
+   * placed, so the shelf never advances, and every later piece fails the same
+   * way.
+   *
+   * Bounded by the obstacle and splice counts, so this stays linear rather than
+   * a scan.
    */
   const shelfStarts = (from: number): number[] => {
     const starts = new Set([from]);
     for (const obstacle of obstacles) {
       if (obstacle.bounds.maxX > from) starts.add(obstacle.bounds.maxX);
+    }
+    for (const splice of request.spliceLines) {
+      if (splice.x > from) starts.add(splice.x);
     }
     return [...starts].sort((a, b) => a - b);
   };
